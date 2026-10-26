@@ -127,9 +127,34 @@ public class MainActivity extends Activity {
             if (s == TextToSpeech.SUCCESS) tts.setLanguage(Locale.US);
         });
 
+        DatGlasses.INSTANCE.init(this);
+        DatGlasses.INSTANCE.setListener(new DatGlasses.Listener() {
+            @Override public void onStatus(String text) { status(text); }
+
+            @Override public void onJpeg(byte[] jpeg) {
+                try {
+                    JSONObject msg = new JSONObject();
+                    msg.put("type", "frame");
+                    msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+                    sendWs(msg);
+                } catch (Exception ignored) { }
+            }
+        });
+
         btnConnect.setOnClickListener(v -> {
             savePrefs();
-            if (connected) disconnect(); else connect();
+            if (glassesMode) {
+                if (connected) {
+                    disconnect();
+                    DatGlasses.INSTANCE.disconnect();
+                } else if (!DatGlasses.INSTANCE.isRegistered()) {
+                    DatGlasses.INSTANCE.register(this);
+                    status("Opening Meta AI registration. Finish there, then tap Connect glasses again.");
+                } else {
+                    DatGlasses.INSTANCE.connect();
+                    connect();
+                }
+            } else if (connected) disconnect(); else connect();
         });
         findViewById(R.id.btnMission).setOnClickListener(v -> {
             savePrefs();
@@ -500,6 +525,7 @@ public class MainActivity extends Activity {
         btnSrcGlasses.setBackgroundResource(glasses ? R.drawable.bg_seg_on : android.R.color.transparent);
         preview.setVisibility(glasses ? android.view.View.GONE : android.view.View.VISIBLE);
         tvGlasses.setVisibility(glasses ? android.view.View.VISIBLE : android.view.View.GONE);
+        btnConnect.setText(glasses ? "Connect glasses" : "Connect");
         status(glasses
                 ? "Meta glasses mode. Frames come from your glasses through the relay; this phone is the controller."
                 : "Phone camera mode. This phone's camera is the eyes.");
@@ -548,6 +574,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         closeCamera();
+        DatGlasses.INSTANCE.disconnect();
         disconnect();
         if (tts != null) tts.shutdown();
         super.onDestroy();

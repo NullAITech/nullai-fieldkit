@@ -12,6 +12,17 @@
         android:label="FieldKit"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true">
+        <!-- Meta Wearables DAT: app id from Wearables Developer Center -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.APPLICATION_ID"
+            android:value="${mwdatAppId}" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT"
+            android:value="true" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CRASH_REPORTING_OPT_OUT"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
