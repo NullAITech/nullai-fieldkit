@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#0B0B10">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="FieldKit by NullAI"
+        android:textColor="#E8C86A"
+        android:textSize="22sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="You talk. It plans. It watches. It guides."
+        android:textColor="#BBBBBB"
+        android:textSize="13sp"
+        android:layout_marginBottom="10dp" />
+
+    <EditText
+        android:id="@+id/etRelay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Relay address (e.g. http://192.168.1.20:8766)"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#777777"
+        android:inputType="textUri"
+        android:singleLine="true" />
+
+    <EditText
+        android:id="@+id/etToken"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Relay token"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#777777"
+        android:inputType="textPassword"
+        android:singleLine="true" />
+
+    <Button
+        android:id="@+id/btnConnect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Connect"
+        android:layout_marginTop="6dp" />
+
+    <TextureView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="180dp"
+        android:layout_marginTop="10dp" />
+
+    <TextView
+        android:id="@+id/tvStep"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Step —"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginTop="12dp" />
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Not connected."
+        android:textColor="#999999"
+        android:textSize="13sp"
+        android:layout_marginTop="4dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp">
+
+        <EditText
+            android:id="@+id/etGoal"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Goal, e.g. replace the air filter"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#777777"
+            android:singleLine="true" />
+
+        <Button
+            android:id="@+id/btnMission"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start mission" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/btnTalk"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Talk" />
+
+        <Button
+            android:id="@+id/btnNext"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Done — next step" />
+    </LinearLayout>
+</LinearLayout>
