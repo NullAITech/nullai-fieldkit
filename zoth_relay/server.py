@@ -13,6 +13,8 @@ import uuid
 
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
+from .providers import provider_presets
+from .sessions import Session
 from .live import LiveError, mint_token
 from .guide import Guide
 from .guide_stream import Conn, StreamHub
@@ -315,23 +317,77 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             raise HTTPException(last["status"], last["detail"])
         return {"id": rid, "agent": target.name, "model": target.model, "text": last["text"], "ms": last["ms"]}
 
-    # -------------------------------- FIELDKIT sessions/missions (D1 stubs; real APIs D2/D3)
+    # -------------------------------- FIELDKIT sessions/missions (Sessions: D2; Missions stub -> D3)
     @app.post("/v1/missions", operation_id="createMission")
     async def create_mission(request: Request, agent: Agent = Depends(auth)):
-        raise HTTPException(501, "Missions API lands Oct 28 (D3); provider layer is ready")
+        raise HTTPException(501, "Missions API lands Oct 28 (D3)")
 
     @app.websocket("/v1/sessions")
     async def sessions(ws: WebSocket):
         ip = ws.headers.get("cf-connecting-ip") or (ws.client.host if ws.client else "?")
         try:
-            relay.authenticate(_bearer(ws.headers), ip, "ws", "/v1/sessions")
+            agent = relay.authenticate(_bearer(ws.headers), ip, "ws", "/v1/sessions")
+            relay.check_sessions(agent, ip, via="ws")
         except RelayError as e:
             await ws.close(code=4000 + e.status, reason=e.detail[:120])
             return
         await ws.accept()
-        await ws.send_json({"type": "error",
-                            "detail": "Sessions API lands Oct 27 (D2); provider layer is ready"})
-        await ws.close(code=1000)
+        try:
+            hello = await ws.receive_json()
+        except Exception:
+            await ws.close(code=4400)
+            return
+        if not isinstance(hello, dict) or hello.get("type") != "hello":
+            await ws.close(code=4400, reason="first message must be hello")
+            return
+        providers = getattr(app.state, "session_providers", None)
+        if providers is None:
+            providers = app.state.session_providers = provider_presets()
+        name = str(hello.get("provider") or "spark")
+        provider = providers.get(name)
+        if provider is None:
+            await ws.send_json({"type": "error", "detail": f"unknown provider '{name}'"})
+            await ws.close(code=1000)
+            return
+        if not provider.configured:
+            await ws.send_json({"type": "error",
+                                "detail": f"provider '{name}' is not configured on this relay"})
+            await ws.close(code=1000)
+            return
+        sess = Session(provider, ws.send_json, getattr(app.state, "session_transport", None))
+        sess.set_hello(str(hello.get("mission") or "")[:2000], str(hello.get("system") or "")[:4000],
+                       hello.get("history_budget"))
+        # counts/ids only: frames, speech and replies are never logged
+        relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="open", provider=name)
+        await ws.send_json({"type": "ready", "provider": name, **provider.public(),
+                            "history_budget": sess.ctx.budget})
+        try:
+            while True:
+                m = await ws.receive_json()
+                if not isinstance(m, dict):
+                    continue
+                t = m.get("type")
+                if t == "frame" and isinstance(m.get("image"), str):
+                    sess.on_frame(m["image"])
+                elif t == "clip" and isinstance(m.get("video_url"), str):
+                    sess.on_clip(m["video_url"])
+                elif t in ("speech", "text") and isinstance(m.get("text"), str):
+                    if t == "text" or m.get("final", True):
+                        sess.start_turn(m["text"][:2000], t)
+                elif t == "mission":
+                    sess.set_mission(str(m.get("text") or "")[:2000])
+                    await ws.send_json(sess.state())
+                elif t == "barge":
+                    await sess.barge()
+                elif t == "bye":
+                    break
+        except (WebSocketDisconnect, RuntimeError, ValueError):
+            pass
+        finally:
+            await sess.close()
+            relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="closed",
+                              turns=sess.turns, frames=sess.frames_received,
+                              frames_changed=sess.frames_changed)
 
     @app.get("/openapi-actions.json", include_in_schema=False)
     async def openapi_actions(request: Request):

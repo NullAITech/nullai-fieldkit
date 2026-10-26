@@ -137,6 +137,10 @@ class Relay:
             raise RelayError(404, "Gemini Live is not enabled on this relay (no `live:` section)")
         return self.cfg.live
 
+    def check_sessions(self, agent: Agent, ip: str = "?", via: str = "rest"):
+        # FIELDKIT Sessions API (D2): capability only; providers are env-driven.
+        self._need(agent, "sessions", ip, via)
+
     # ------------------------------------------------------------ ops
     def status(self, agent: Agent, ip: str = "?", via: str = "rest") -> dict:
         self._need(agent, "status", ip, via)
