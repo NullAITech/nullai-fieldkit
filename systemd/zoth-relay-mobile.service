@@ -1,0 +1,28 @@
+# User-level mobile instance (no root). Install: copy to ~/.config/systemd/user/, then
+#   systemctl --user enable --now zoth-relay-mobile ; loginctl enable-linger $USER
+[Unit]
+Description=zoth-relay mobile API (Zoth Live / Zoth Guide over Tailscale, port 8766)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=ZOTH_RELAY_CONFIG=%h/.config/zoth-relay/mobile/config.yaml
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-%h/.config/zoth-relay/mobile/secrets.env
+WorkingDirectory=%h/.local/share/zoth-relay-mobile/app
+ExecStart=%h/.local/share/zoth-relay-mobile/venv/bin/python -m zoth_relay serve
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1G
+TasksMax=128
+Nice=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,24 @@
+# Example only — generate real entries with `sudo zoth-relay agent add`.
+agents:
+  muse:
+    token_sha256: "<64 hex chars>"
+    profile: dev                # read-only | workspace | exec | dev (Landlock-sandboxed exec, see docs/muse-code.md)
+    allowed_dirs: [~/agent-workspace/muse]   # dev: exactly one dir
+    dev_ports: "4100-4199"      # dev: the only TCP ports it may bind (127.0.0.1)
+    default_timeout: 300        # per-agent overrides (capped by global max_timeout)
+    max_timeout: 900
+    max_output_bytes: 20971520
+    rate_limit_per_minute: 300
+  chatgpt:
+    token_sha256: "<64 hex chars>"
+    profile: workspace
+    allowed_dirs: [~/agent-workspace/chatgpt]
+  dots:
+    token_sha256: "<64 hex chars>"
+    profile: read-only
+    allowed_dirs: [~/agent-workspace/shared]
+    allowed_commands: []        # with profile exec: restrict programs, e.g. [git, ls, cat]
+  local-admin:
+    token_sha256: "<64 hex chars>"
+    profile: read-only
+    dashboard: true             # may open the localhost dashboard

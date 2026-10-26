@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# zoth-guide up|down|status|log — Zoth Guide "Local vision + AGY" on zoth-pill.
+#   up    : start the mobile relay if needed, warm Ollama vision + local TTS, start the persistent
+#           AGY session, and open Konsole on a tmux session that shows AGY live.
+#   down  : stop the AGY session, unload the vision model, close the tmux/Konsole window.
+# Talks to the relay's loopback-only admin endpoint; no tokens needed or printed.
+set -euo pipefail
+RELAY="${ZOTH_RELAY_URL:-http://127.0.0.1:8766}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zoth-relay-mobile"
+LOG="$STATE/agy-live.log"
+TMUX_SESSION="zoth-guide"
+mkdir -p "$STATE" && chmod 700 "$STATE"
+touch "$LOG" && chmod 600 "$LOG"
+
+admin() { curl -fsS -m 120 -X POST "$RELAY/v1/guide/admin/$1"; echo; }
+
+case "${1:-status}" in
+  up)
+    systemctl --user is-active --quiet zoth-relay-mobile || systemctl --user start zoth-relay-mobile
+    for _ in $(seq 1 20); do curl -fsS -m 2 "$RELAY/health" >/dev/null 2>&1 && break; sleep 0.5; done
+    echo "Warming vision model + TTS and starting AGY (first run can take ~10-20 s)..."
+    admin up
+    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      tmux new-session -d -s "$TMUX_SESSION" -n agy "tail -n 200 -F '$LOG'"
+      tmux split-window -v -l 6 -t "$TMUX_SESSION" "watch -n 5 \"curl -fsS -X POST $RELAY/v1/guide/admin/status; echo; sensors 2>/dev/null | grep -m1 Package\""
+      tmux select-pane -t "$TMUX_SESSION:agy.0"
+    fi
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v konsole >/dev/null; then
+      (setsid konsole --title "Zoth Guide · AGY live" -e tmux attach -t "$TMUX_SESSION" >/dev/null 2>&1 &)
+    else
+      echo "Attach with: tmux attach -t $TMUX_SESSION"
+    fi ;;
+  down)
+    admin down || true
+    tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+    echo "Zoth Guide stopped." ;;
+  status) curl -fsS -m 5 -X POST "$RELAY/v1/guide/admin/status"; echo ;;
+  log) exec tail -n 200 -F "$LOG" ;;
+  *) echo "usage: zoth-guide up|down|status|log" >&2; exit 2 ;;
+esac

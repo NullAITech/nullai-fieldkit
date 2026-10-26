@@ -1,0 +1,35 @@
+# zoth-relay configuration. Installed copy: /etc/zoth-relay/config.yaml (0640 root:zoth-relay).
+# There is NO shared token any more: each agent gets its own token via
+#   sudo zoth-relay agent add <name> --profile read-only|workspace|exec
+# Only SHA-256 hashes are stored (in agents_file).
+
+host: 127.0.0.1          # keep loopback; cloudflared connects locally
+port: 8765
+agents_file: /etc/zoth-relay/agents.yaml
+
+# Default allowed dirs for agents that don't set their own. "~" = service user's home.
+# Dirs outside /home/zoth-relay also need BindPaths=/ReadWritePaths= in the systemd unit.
+allowed_dirs:
+  - ~/agent-workspace
+
+audit_log: /var/log/zoth-relay/audit.log
+default_timeout: 60
+max_timeout: 900
+max_file_bytes: 10485760
+max_output_bytes: 5242880
+
+# Public base URL written into /openapi-actions.json (e.g. your trycloudflare URL).
+# Empty = derive from the request Host header.
+public_url: ""
+
+# MCP DNS-rebinding protection: list Host values to allow (e.g. "127.0.0.1:8765",
+# "xyz.trycloudflare.com"). Empty = check disabled (bearer token is still required).
+mcp_allowed_hosts: []
+
+# Extra substrings refused in exec, on top of the built-in blocklist.
+blocklist:
+  - "rm -rf /"
+  - "chmod -R 777 /"
+  - "> /dev/sda"
+  - "nc -e"
+  - "/etc/shadow"

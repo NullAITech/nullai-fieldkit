@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest
+pytest-asyncio
+openapi-spec-validator==0.9.0

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Zoth Relay
+GenericName=AI Agent Bridge Dashboard
+Comment=Read-only status of zoth-relay agents and recent audit events (localhost)
+Exec=xdg-open http://127.0.0.1:@PORT@/dashboard
+Icon=zoth-relay
+Terminal=false
+Categories=System;Monitor;
+Keywords=zoth;relay;mcp;agent;muse;grok;chatgpt;
+StartupNotify=false

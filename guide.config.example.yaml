@@ -1,0 +1,44 @@
+# Append to ~/.config/zoth-relay/mobile/config.yaml on zoth-pill, then:
+#   systemctl --user restart zoth-relay-mobile
+guide:
+  max_tokens: 80
+  transcript_len: 12          # captions kept in the rolling visual transcript
+  # Mode "Hermes via ZOTHOS": your own Hermes Agent (gateway API server on loopback).
+  hermes:
+    base_url: http://127.0.0.1:8642/v1
+    model: hermes-agent
+    api_key_env: API_SERVER_KEY   # same value as API_SERVER_KEY in ~/.hermes/.env, put in secrets.env
+    timeout: 45
+  # Optional: direct Nous Portal if the Hermes gateway is down. Free Portal models are TEXT-ONLY,
+  # so this fallback answers speech without seeing the frame. Needs NOUS_API_KEY in secrets.env.
+  # fallback:
+  #   model: stepfun/step-3.7-flash:free
+  #   vision: false
+  # Mode "Local vision + AGY"
+  local_vision:
+    base_url: http://127.0.0.1:11434
+    model: moondream          # ollama pull moondream  (1.7 GB, CPU-friendly)
+    num_thread: 4             # of 12 threads; keeps the laptop usable and cooler
+    keep_alive: 10m           # model unloads from RAM 10 min after the last frame
+    hot_c: 88                 # pause captioning above this CPU package temp
+    min_interval: 3
+  agy:
+    command: ~/.local/bin/agy
+    effort: low
+    timeout: 30
+    min_interval: 12          # unprompted suggestions at most every 12 s (speech is immediate)
+  # ---- 0.4.0 streaming "Local vision + AGY" (/v1/guide/stream) ----
+  stream:
+    batch_interval: 3
+    caption_interval: 1.5
+    max_batch: 4
+    idle_unload: 600          # unload moondream 10 min after the phone disconnects
+    mirror: ~/.local/state/zoth-relay-mobile/agy-live.log   # shown live in Konsole by `zoth-guide up`
+  tts:
+    engine: kokoro            # kokoro | piper | none (none = phone's Android voice)
+    model: ~/.local/share/zoth-tts/kokoro-v1.0.onnx        # fp32 file; the int8 one is ~3x slower on this CPU
+    voices: ~/.local/share/zoth-tts/voices-v1.0.bin
+    voice: af_heart
+    speed: 1.1
+    threads: 3
+    piper_model: ~/.local/share/zoth-tts/en_US-lessac-medium.onnx

@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+PyYAML==6.0.2
+mcp==1.30.0
+httpx==0.28.1
+starlette==0.41.3
+pydantic==2.14.1
+anyio==4.15.1

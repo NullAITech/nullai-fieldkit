@@ -1,0 +1,19 @@
+# Example config for the user-level mobile instance (~/.config/zoth-relay/mobile/config.yaml)
+hosts: [127.0.0.1, 100.x.y.z]   # loopback + your Tailscale IP (tailscale ip -4). Wildcards are rejected.
+port: 8766
+agents_file: ~/.config/zoth-relay/mobile/agents.yaml
+audit_log: ~/.local/state/zoth-relay-mobile/audit.log
+allowed_dirs: [~/.local/state/zoth-relay-mobile/ws]
+ask_default: gemini
+ask_targets:
+  local: {label: "Local (Ollama)", base_url: "http://127.0.0.1:11434/v1", model: "llama3.2:1b", vision: false}
+  grok: {label: "Grok (xAI)", base_url: "https://api.x.ai/v1", model: "grok-4", api_key_env: XAI_API_KEY}
+  openai: {label: "OpenAI", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", api_key_env: OPENAI_API_KEY}
+  gemini: {label: "Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", api_key_env: GEMINI_API_KEY, extra: {reasoning_effort: none}}
+  claude: {label: "Claude", base_url: "https://api.anthropic.com/v1", model: "claude-haiku-4-5", api_key_env: ANTHROPIC_API_KEY}
+live:                       # Gemini Live ephemeral tokens (POST /v1/live/token)
+  model: gemini-3.8-live
+  api_key_env: GEMINI_API_KEY
+  api_version: v1alpha
+  response_modalities: [AUDIO]
+  # voice: Puck
