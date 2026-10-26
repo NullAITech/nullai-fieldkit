@@ -72,10 +72,9 @@ def until_done(ws, limit=12):
     return evs
 
 
-def test_missions_still_501_until_d3(env):
-    assert env["c"].post("/v1/missions", json={}).status_code == 401
-    r = env["c"].post("/v1/missions", json={}, headers=H(MOB))
-    assert r.status_code == 501 and "Oct 28" in r.json()["detail"]
+def test_missions_requires_auth(env):
+    # Real Missions API coverage lives in test_missions.py (D3); here: auth wall.
+    assert env["c"].post("/v1/missions", json={"goal": "x"}).status_code == 401
 
 
 def test_sessions_rejects_anonymous_and_wrong_profile(env):

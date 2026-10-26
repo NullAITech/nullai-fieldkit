@@ -13,6 +13,7 @@ import uuid
 
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
+from .missions import MissionError, MissionStore, assess_step, plan_checklist
 from .providers import provider_presets
 from .sessions import Session
 from .live import LiveError, mint_token
@@ -58,6 +59,16 @@ class AskRequest(BaseModel):
 class LiveTokenRequest(BaseModel):
     mission: str | None = Field(None, max_length=2000)
     voice: str | None = Field(None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+
+
+class MissionCreate(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=2000)
+    provider: str | None = Field(None, max_length=64, description="planner provider; default wonder")
+
+
+class MissionEventIn(BaseModel):
+    type: str = Field(..., max_length=16)
+    observation: str | None = Field(None, max_length=2000)
 
 
 class GuideTurnRequest(BaseModel):
@@ -317,10 +328,81 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             raise HTTPException(last["status"], last["detail"])
         return {"id": rid, "agent": target.name, "model": target.model, "text": last["text"], "ms": last["ms"]}
 
-    # -------------------------------- FIELDKIT sessions/missions (Sessions: D2; Missions stub -> D3)
+    # -------------------------------- FIELDKIT sessions/missions (Sessions: D2; Missions: D3)
+    def missions_store() -> MissionStore:
+        st = getattr(app.state, "missions", None)
+        if st is None:
+            st = app.state.missions = MissionStore()
+        return st
+
+    def fieldkit_providers() -> dict:
+        ps = getattr(app.state, "session_providers", None)
+        if ps is None:
+            ps = app.state.session_providers = provider_presets()
+        return ps
+
     @app.post("/v1/missions", operation_id="createMission")
-    async def create_mission(request: Request, agent: Agent = Depends(auth)):
-        raise HTTPException(501, "Missions API lands Oct 28 (D3)")
+    async def create_mission(request: Request, body: MissionCreate, agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        name = (body.provider or "wonder").strip()
+        provider = fieldkit_providers().get(name)
+        if provider is None:
+            raise HTTPException(404, f"unknown provider '{name}'")
+        if not provider.configured:
+            raise HTTPException(503, f"provider '{name}' is not configured on this relay")
+        try:
+            steps = await plan_checklist(provider, body.goal.strip(),
+                                         getattr(app.state, "session_transport", None))
+        except MissionError as e:
+            relay.audit.write("mission_create", agent=agent.name, ip=ip, via="rest",
+                              result="error", status=e.status, provider=name)
+            raise HTTPException(e.status, e.detail)
+        m = missions_store().create(body.goal.strip(), steps, provider=name)
+        # ids + counts only: goals and steps are never written to the audit log
+        relay.audit.write("mission_create", agent=agent.name, ip=ip, via="rest", result="ok",
+                          mission=m.id, provider=name, steps=len(steps))
+        return JSONResponse(m.public(), status_code=201)
+
+    @app.get("/v1/missions/{mission_id}", operation_id="getMission")
+    async def get_mission(request: Request, mission_id: str, agent: Agent = Depends(auth)):
+        relay.check_missions(agent, client_ip(request))
+        m = missions_store().get(mission_id)
+        if m is None:
+            raise HTTPException(404, "unknown mission")
+        return m.public()
+
+    @app.post("/v1/missions/{mission_id}/events", operation_id="missionEvent")
+    async def mission_event(request: Request, mission_id: str, body: MissionEventIn,
+                            agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        store = missions_store()
+        m = store.get(mission_id)
+        if m is None:
+            raise HTTPException(404, "unknown mission")
+        if body.type in ("advance", "skip"):
+            store.apply_event(mission_id, body.type)
+            say = m.current_step_text or "Mission complete."
+            ev_name = "advanced" if body.type == "advance" else "skipped"
+        elif body.type == "assess":
+            provider = fieldkit_providers().get(m.provider)
+            if provider is None or not provider.configured:
+                raise HTTPException(503, f"mission provider '{m.provider}' is not available")
+            try:
+                ev = await assess_step(provider, m, (body.observation or "")[:2000],
+                                       getattr(app.state, "session_transport", None))
+            except MissionError as e:
+                raise HTTPException(e.status, e.detail)
+            if ev.type == "step_done":
+                store.apply_event(mission_id, "advance")
+            say = ev.say or (m.current_step_text or "Mission complete.")
+            ev_name = ev.type
+        else:
+            raise HTTPException(400, f"unknown mission event '{body.type}'")
+        relay.audit.write("mission_event", agent=agent.name, ip=ip, via="rest", result="ok",
+                          mission=mission_id, kind=ev_name, current=m.current)
+        return {"event": ev_name, "say": say, "mission": m.public()}
 
     @app.websocket("/v1/sessions")
     async def sessions(ws: WebSocket):
@@ -357,10 +439,21 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         sess = Session(provider, ws.send_json, getattr(app.state, "session_transport", None))
         sess.set_hello(str(hello.get("mission") or "")[:2000], str(hello.get("system") or "")[:4000],
                        hello.get("history_budget"))
+        mid = str(hello.get("mission_id") or "")
+        if mid:
+            if missions_store().get(mid) is None:
+                await ws.send_json({"type": "error", "detail": f"unknown mission '{mid}'"})
+                await ws.close(code=1000)
+                return
+            sess.attach_mission(missions_store(), mid)
         # counts/ids only: frames, speech and replies are never logged
         relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="open", provider=name)
-        await ws.send_json({"type": "ready", "provider": name, **provider.public(),
-                            "history_budget": sess.ctx.budget})
+        ready = {"type": "ready", "provider": name, **provider.public(),
+                 "history_budget": sess.ctx.budget}
+        ms = sess.mission_state()
+        if ms is not None:
+            ready["mission"] = ms
+        await ws.send_json(ready)
         try:
             while True:
                 m = await ws.receive_json()

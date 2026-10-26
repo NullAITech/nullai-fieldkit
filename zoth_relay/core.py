@@ -141,6 +141,10 @@ class Relay:
         # FIELDKIT Sessions API (D2): capability only; providers are env-driven.
         self._need(agent, "sessions", ip, via)
 
+    def check_missions(self, agent: Agent, ip: str = "?", via: str = "rest"):
+        # FIELDKIT Missions API (D3): capability only; planner provider is env-driven.
+        self._need(agent, "missions", ip, via)
+
     # ------------------------------------------------------------ ops
     def status(self, agent: Agent, ip: str = "?", via: str = "rest") -> dict:
         self._need(agent, "status", ip, via)

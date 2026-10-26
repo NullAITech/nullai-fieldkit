@@ -26,7 +26,7 @@ PROFILE_CAPS = {
     "dev": {"status", "read_file", "list_dir", "write_file", "run_command"},
     # mobile = phone/glasses apps: may only ask an AI target (text + image) and read status.
     # No file access, no exec.
-    "mobile": {"status", "ask", "live", "guide", "sessions"},
+    "mobile": {"status", "ask", "live", "guide", "sessions", "missions"},
 }
 DEFAULT_DEV_PORTS = "4100-4199"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")

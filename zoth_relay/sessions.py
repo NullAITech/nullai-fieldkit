@@ -100,6 +100,29 @@ class Session:
     def set_mission(self, text: str) -> None:
         self.mission = text or ""
 
+    # ------------------------------------------------------------ mission attach (D3)
+    def attach_mission(self, store, mission_id: str) -> None:
+        self._mission_store, self._mission_id = store, mission_id
+
+    def _mission(self):
+        store = getattr(self, "_mission_store", None)
+        return store.get(self._mission_id) if store is not None else None
+
+    def mission_state(self) -> dict | None:
+        m = self._mission()
+        if m is None:
+            return None
+        return {"id": m.id, "goal": m.goal, "current": m.current,
+                "total": len(m.steps), "step": m.current_step_text, "complete": m.complete}
+
+    def _mission_text(self) -> str:
+        m = self._mission()
+        if m is None:
+            return self.mission
+        if m.complete:
+            return f"{m.goal} | Mission complete"
+        return f"{m.goal} | Current step {m.current}/{len(m.steps)}: {m.current_step_text}"
+
     async def close(self) -> None:
         self.closed = True
         if self._task and not self._task.done():
@@ -134,17 +157,21 @@ class Session:
         self._task = asyncio.create_task(self.run_turn(prompt, kind))
 
     def state(self) -> dict:
-        return {"type": "state", "provider": self.provider.name, "turns": self.turns,
-                "frames_received": self.frames_received, "frames_changed": self.frames_changed,
-                "frames_sent": self.frames_sent, "history_chars": self.ctx.chars,
-                "history_budget": self.ctx.budget}
+        out = {"type": "state", "provider": self.provider.name, "turns": self.turns,
+               "frames_received": self.frames_received, "frames_changed": self.frames_changed,
+               "frames_sent": self.frames_sent, "history_chars": self.ctx.chars,
+               "history_budget": self.ctx.budget}
+        ms = self.mission_state()
+        if ms is not None:
+            out["mission"] = ms
+        return out
 
     async def run_turn(self, prompt: str, kind: str = "speech") -> None:
         self._task = asyncio.current_task()
         gen = self.gen
         image, self._pending_frame = self._pending_frame, None
         clip, self._pending_clip = self._pending_clip, None
-        turn = Turn(prompt=prompt, system=self.system, mission=self.mission,
+        turn = Turn(prompt=prompt, system=self.system, mission=self._mission_text(),
                     history=self.ctx.history(), image=image, video_url=clip)
         t0 = time.monotonic()
         full: list[str] = []
