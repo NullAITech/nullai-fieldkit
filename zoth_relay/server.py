@@ -315,6 +315,24 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             raise HTTPException(last["status"], last["detail"])
         return {"id": rid, "agent": target.name, "model": target.model, "text": last["text"], "ms": last["ms"]}
 
+    # -------------------------------- FIELDKIT sessions/missions (D1 stubs; real APIs D2/D3)
+    @app.post("/v1/missions", operation_id="createMission")
+    async def create_mission(request: Request, agent: Agent = Depends(auth)):
+        raise HTTPException(501, "Missions API lands Oct 28 (D3); provider layer is ready")
+
+    @app.websocket("/v1/sessions")
+    async def sessions(ws: WebSocket):
+        ip = ws.headers.get("cf-connecting-ip") or (ws.client.host if ws.client else "?")
+        try:
+            relay.authenticate(_bearer(ws.headers), ip, "ws", "/v1/sessions")
+        except RelayError as e:
+            await ws.close(code=4000 + e.status, reason=e.detail[:120])
+            return
+        await ws.accept()
+        await ws.send_json({"type": "error",
+                            "detail": "Sessions API lands Oct 27 (D2); provider layer is ready"})
+        await ws.close(code=1000)
+
     @app.get("/openapi-actions.json", include_in_schema=False)
     async def openapi_actions(request: Request):
         # Schema only (no data); public so ChatGPT's "Import from URL" works.
