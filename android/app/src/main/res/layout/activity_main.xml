@@ -14,7 +14,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="FieldKit"
+            android:text="Spotter"
             android:textColor="#111111"
             android:textSize="28sp"
             android:textStyle="bold" />
@@ -22,9 +22,17 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="by NullAI · your mission coach"
+            android:text="FieldKit by NullAI · your mission coach"
             android:textColor="#444444"
-            android:textSize="14sp"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/tvCompass"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Heading —"
+            android:textColor="#444444"
+            android:textSize="12sp"
             android:layout_marginBottom="18dp" />
 
         <TextView
@@ -84,7 +92,28 @@
                 android:textColor="#333333"
                 android:textSize="14sp"
                 android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvBraille"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#FFFFFF"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:lineSpacingMultiplier="0.82"
+                android:textColor="#111111"
+                android:textSize="5.2sp"
+                android:visibility="gone" />
         </FrameLayout>
+
+        <Button
+            android:id="@+id/btnEyes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Eyes view: photo"
+            android:textColor="#111111"
+            android:background="@drawable/bg_btn_light"
+            android:layout_marginTop="8dp" />
 
         <LinearLayout
             android:layout_width="match_parent"

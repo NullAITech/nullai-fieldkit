@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="FieldKit"
+        android:label="Spotter"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true">
         <!-- Meta Wearables DAT: app id from Wearables Developer Center -->

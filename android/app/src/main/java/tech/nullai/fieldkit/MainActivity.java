@@ -5,10 +5,16 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.graphics.YuvImage;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
@@ -69,12 +75,17 @@ public class MainActivity extends Activity {
     private static final int REQ_SPEECH = 9;
 
     private EditText etRelay, etToken, etGoal;
-    private TextView tvStep, tvStatus, tvGlasses;
+    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvBraille;
     private TextureView preview;
     private Button btnConnect, btnSrcPhone, btnSrcGlasses;
     private boolean glassesMode = false;
     private boolean scanning = false;
+    private boolean brailleOn = false;
+    private long lastBrailleAt = 0;
     private MultiFormatReader qrReader;
+    private SensorManager sensors;
+    private final float[] grav = new float[3], mag = new float[3];
+    private boolean hasGrav, hasMag;
 
     private final OkHttpClient http = new OkHttpClient.Builder()
             .pingInterval(20, TimeUnit.SECONDS).build();
@@ -99,7 +110,20 @@ public class MainActivity extends Activity {
         tvStep = findViewById(R.id.tvStep);
         tvStatus = findViewById(R.id.tvStatus);
         tvGlasses = findViewById(R.id.tvGlasses);
+        tvCompass = findViewById(R.id.tvCompass);
+        tvBraille = findViewById(R.id.tvBraille);
         preview = findViewById(R.id.preview);
+
+        sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
+        Button btnEyes = findViewById(R.id.btnEyes);
+        btnEyes.setOnClickListener(v -> {
+            brailleOn = !brailleOn;
+            tvBraille.setVisibility(brailleOn ? android.view.View.VISIBLE : android.view.View.GONE);
+            if (!glassesMode) {
+                preview.setVisibility(brailleOn ? android.view.View.GONE : android.view.View.VISIBLE);
+            }
+            btnEyes.setText(brailleOn ? "Eyes view: braille" : "Eyes view: photo");
+        });
         btnConnect = findViewById(R.id.btnConnect);
         btnSrcPhone = findViewById(R.id.btnSrcPhone);
         btnSrcGlasses = findViewById(R.id.btnSrcGlasses);
@@ -132,6 +156,7 @@ public class MainActivity extends Activity {
             @Override public void onStatus(String text) { status(text); }
 
             @Override public void onJpeg(byte[] jpeg) {
+                showBraille(jpeg);
                 try {
                     JSONObject msg = new JSONObject();
                     msg.put("type", "frame");
@@ -433,6 +458,7 @@ public class MainActivity extends Activity {
                         lastFrameAt = now;
                         byte[] jpeg = yuvToJpeg(img);
                         if (jpeg != null) {
+                            showBraille(jpeg);
                             JSONObject msg = new JSONObject();
                             msg.put("type", "frame");
                             msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
@@ -569,6 +595,79 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             status("That code was not a FieldKit pairing code.");
         }
+    }
+
+    // ------------------------------------------------------------- compass + braille eyes view
+    private final SensorEventListener compassListener = new SensorEventListener() {
+        @Override public void onSensorChanged(SensorEvent e) {
+            if (e.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+                System.arraycopy(e.values, 0, grav, 0, 3);
+                hasGrav = true;
+            } else if (e.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+                System.arraycopy(e.values, 0, mag, 0, 3);
+                hasMag = true;
+            }
+            if (!hasGrav || !hasMag) return;
+            float[] r = new float[9], o = new float[3];
+            if (SensorManager.getRotationMatrix(r, null, grav, mag)) {
+                SensorManager.getOrientation(r, o);
+                int az = (int) ((Math.toDegrees(o[0]) + 360) % 360);
+                String[] winds = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+                String wind = winds[(int) Math.round(az / 45.0) % 8];
+                tvCompass.setText(String.format(Locale.US, "Heading %03d° %s", az, wind));
+            }
+        }
+
+        @Override public void onAccuracyChanged(Sensor s, int accuracy) { }
+    };
+
+    @Override protected void onResume() {
+        super.onResume();
+        Sensor acc = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        Sensor mg = sensors.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        if (acc != null) sensors.registerListener(compassListener, acc, SensorManager.SENSOR_DELAY_UI);
+        if (mg != null) sensors.registerListener(compassListener, mg, SensorManager.SENSOR_DELAY_UI);
+    }
+
+    @Override protected void onPause() {
+        sensors.unregisterListener(compassListener);
+        super.onPause();
+    }
+
+    private void showBraille(byte[] jpeg) {
+        if (!brailleOn || jpeg == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastBrailleAt < 250) return;
+        lastBrailleAt = now;
+        Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+        if (bmp == null) return;
+        String art = brailleOf(bmp, 54);
+        runOnUiThread(() -> tvBraille.setText(art));
+    }
+
+    /** Live eyes view: luminance -> ordered (Bayer 4x4) dither -> braille cells (2x4 dots). */
+    static String brailleOf(Bitmap src, int cols) {
+        int rows = Math.max(6, (int) (cols * (src.getHeight() / (float) src.getWidth()) * 0.5f));
+        Bitmap small = Bitmap.createScaledBitmap(src, cols * 2, rows * 4, true);
+        int[][] bayer = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+        int[][] dotBit = {{1, 2, 4, 64}, {8, 16, 32, 128}};
+        StringBuilder sb = new StringBuilder();
+        for (int cy = 0; cy < rows; cy++) {
+            for (int cx = 0; cx < cols; cx++) {
+                int bits = 0;
+                for (int dx = 0; dx < 2; dx++) {
+                    for (int dy = 0; dy < 4; dy++) {
+                        int px = small.getPixel(cx * 2 + dx, cy * 4 + dy);
+                        int lum = (299 * ((px >> 16) & 0xFF) + 587 * ((px >> 8) & 0xFF) + 114 * (px & 0xFF)) / 1000;
+                        int thr = (int) ((bayer[(cy * 4 + dy) % 4][(cx * 2 + dx) % 4] + 0.5f) / 16f * 255f);
+                        if (lum < thr) bits |= dotBit[dx][dy];
+                    }
+                }
+                sb.append((char) (0x2800 + bits));
+            }
+            if (cy < rows - 1) sb.append('\n');
+        }
+        return sb.toString();
     }
 
     @Override
