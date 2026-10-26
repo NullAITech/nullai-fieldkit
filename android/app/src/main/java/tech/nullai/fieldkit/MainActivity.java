@@ -30,6 +30,13 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.DecodeHintType;
+import com.google.zxing.MultiFormatReader;
+import com.google.zxing.PlanarYUVLuminanceSource;
+import com.google.zxing.common.HybridBinarizer;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -37,8 +44,10 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.MediaType;
@@ -60,9 +69,12 @@ public class MainActivity extends Activity {
     private static final int REQ_SPEECH = 9;
 
     private EditText etRelay, etToken, etGoal;
-    private TextView tvStep, tvStatus;
+    private TextView tvStep, tvStatus, tvGlasses;
     private TextureView preview;
-    private Button btnConnect;
+    private Button btnConnect, btnSrcPhone, btnSrcGlasses;
+    private boolean glassesMode = false;
+    private boolean scanning = false;
+    private MultiFormatReader qrReader;
 
     private final OkHttpClient http = new OkHttpClient.Builder()
             .pingInterval(20, TimeUnit.SECONDS).build();
@@ -86,8 +98,26 @@ public class MainActivity extends Activity {
         etGoal = findViewById(R.id.etGoal);
         tvStep = findViewById(R.id.tvStep);
         tvStatus = findViewById(R.id.tvStatus);
+        tvGlasses = findViewById(R.id.tvGlasses);
         preview = findViewById(R.id.preview);
         btnConnect = findViewById(R.id.btnConnect);
+        btnSrcPhone = findViewById(R.id.btnSrcPhone);
+        btnSrcGlasses = findViewById(R.id.btnSrcGlasses);
+
+        qrReader = new MultiFormatReader();
+        Map<DecodeHintType, Object> hints = new EnumMap<>(DecodeHintType.class);
+        hints.put(DecodeHintType.POSSIBLE_FORMATS, Arrays.asList(BarcodeFormat.QR_CODE));
+        hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
+        qrReader.setHints(hints);
+
+        btnSrcPhone.setOnClickListener(v -> setSource(false));
+        btnSrcGlasses.setOnClickListener(v -> setSource(true));
+        findViewById(R.id.btnScan).setOnClickListener(v -> {
+            if (glassesMode) setSource(false);
+            scanning = true;
+            status("Point the camera at the relay QR code…");
+        });
+        setSource(false);
 
         SharedPreferences p = getSharedPreferences("fieldkit", MODE_PRIVATE);
         etRelay.setText(p.getString("relay", "http://192.168.1.20:8766"));
@@ -167,6 +197,7 @@ public class MainActivity extends Activity {
                     JSONObject hello = new JSONObject();
                     hello.put("type", "hello");
                     hello.put("provider", "spark");
+                    hello.put("source", glassesMode ? "glasses" : "phone");
                     if (!missionId.isEmpty()) hello.put("mission_id", missionId);
                     webSocket.send(hello.toString());
                 } catch (Exception ignored) { }
@@ -364,8 +395,16 @@ public class MainActivity extends Activity {
                 Image img = r.acquireLatestImage();
                 if (img == null) return;
                 try {
+                    if (scanning) {
+                        String payload = tryDecodeQr(img);
+                        if (payload != null) {
+                            scanning = false;
+                            runOnUiThread(() -> applyQr(payload));
+                            return;
+                        }
+                    }
                     long now = System.currentTimeMillis();
-                    if (connected && now - lastFrameAt >= 1500) {
+                    if (connected && !glassesMode && now - lastFrameAt >= 1500) {
                         lastFrameAt = now;
                         byte[] jpeg = yuvToJpeg(img);
                         if (jpeg != null) {
@@ -452,6 +491,58 @@ public class MainActivity extends Activity {
         int n = src.remaining();
         src.get(dst, pos, n);
         return n;
+    }
+
+    // ------------------------------------------------------------- camera source + QR pairing
+    private void setSource(boolean glasses) {
+        glassesMode = glasses;
+        btnSrcPhone.setBackgroundResource(glasses ? android.R.color.transparent : R.drawable.bg_seg_on);
+        btnSrcGlasses.setBackgroundResource(glasses ? R.drawable.bg_seg_on : android.R.color.transparent);
+        preview.setVisibility(glasses ? android.view.View.GONE : android.view.View.VISIBLE);
+        tvGlasses.setVisibility(glasses ? android.view.View.VISIBLE : android.view.View.GONE);
+        status(glasses
+                ? "Meta glasses mode. Frames come from your glasses through the relay; this phone is the controller."
+                : "Phone camera mode. This phone's camera is the eyes.");
+    }
+
+    private String tryDecodeQr(Image img) {
+        try {
+            Image.Plane y = img.getPlanes()[0];
+            ByteBuffer buf = y.getBuffer().duplicate();
+            buf.rewind();
+            int w = img.getWidth(), h = img.getHeight(), stride = y.getRowStride();
+            byte[] data = new byte[w * h];
+            byte[] row = new byte[stride];
+            for (int r = 0; r < h; r++) {
+                int n = Math.min(stride, buf.remaining());
+                buf.get(row, 0, n);
+                System.arraycopy(row, 0, data, r * w, Math.min(w, n));
+            }
+            PlanarYUVLuminanceSource src = new PlanarYUVLuminanceSource(
+                    data, w, h, 0, 0, w, h, false);
+            String text = qrReader.decodeWithState(new BinaryBitmap(new HybridBinarizer(src))).getText();
+            qrReader.reset();
+            return text;
+        } catch (Exception e) {
+            try { qrReader.reset(); } catch (Exception ignored) { }
+            return null;
+        }
+    }
+
+    private void applyQr(String payload) {
+        try {
+            JSONObject o = new JSONObject(payload);
+            String relay = o.optString("relay");
+            String tok = o.optString("token");
+            if (relay.isEmpty() || tok.isEmpty()) throw new Exception("bad payload");
+            etRelay.setText(relay);
+            etToken.setText(tok);
+            savePrefs();
+            status("Paired with " + o.optString("name", "FieldKit Relay") + ". Connecting…");
+            if (!connected) connect();
+        } catch (Exception e) {
+            status("That code was not a FieldKit pairing code.");
+        }
     }
 
     @Override
