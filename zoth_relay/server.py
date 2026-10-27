@@ -382,6 +382,14 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         out["prior_notes"] = hints
         return JSONResponse(out, status_code=201)
 
+    @app.get("/v1/missions/latest", operation_id="latestMission")
+    async def latest_mission(agent: Agent = Depends(auth)):
+        relay.check_missions(agent, "?")
+        m = missions_store().latest()
+        if m is None:
+            raise HTTPException(404, "no missions yet")
+        return m.public()
+
     @app.get("/v1/missions/{mission_id}", operation_id="getMission")
     async def get_mission(request: Request, mission_id: str, agent: Agent = Depends(auth)):
         relay.check_missions(agent, client_ip(request))
@@ -416,6 +424,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                                        getattr(app.state, "session_transport", None))
             except MissionError as e:
                 raise HTTPException(e.status, e.detail)
+            m.last_event = ev.type
             if ev.type == "step_done":
                 store.apply_event(mission_id, "advance")
                 jot_res = await jot_bridge.checkoff(mission_id, done_n)
@@ -436,6 +445,48 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             m, getattr(app.state, "session_transport", None)) if m.complete else None
         return {"event": ev_name, "say": say, "mission": m.public(),
                 "jot": jot_res, "recap": recap_res}
+
+    @app.post("/v1/missions/{mission_id}/recap", operation_id="missionRecap")
+    async def mission_recap(request: Request, mission_id: str,
+                            agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        m = missions_store().get(mission_id)
+        if m is None:
+            raise HTTPException(404, "unknown mission")
+        res = await recap.maybe_recap(
+            m, getattr(app.state, "session_transport", None), force=True)
+        relay.audit.write("mission_recap", agent=agent.name, ip=ip, via="rest",
+                          result="ok" if res.get("ok") else "error", mission=mission_id,
+                          source=res.get("source", ""))
+        return {"recap": res, "mission": m.public()}
+
+    # Live Mode (D5): confirm-gated public streaming. The gate issues a
+    # one-time confirm token; only an explicit repeat with it goes live.
+    from .live_mode import LIVE
+
+    @app.get("/v1/live", operation_id="liveStatus")
+    async def live_status(agent: Agent = Depends(auth)):
+        relay.check_missions(agent, "?")
+        return LIVE.status()
+
+    @app.post("/v1/live/start", operation_id="liveStart")
+    async def live_start(request: Request, body: dict, agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        res = LIVE.start(str(body.get("confirm") or "") or None,
+                         str(body.get("destination") or ""))
+        relay.audit.write("live_start", agent=agent.name, ip=ip, via="rest",
+                          result="live" if res.get("ok") else "needs_confirm")
+        return res
+
+    @app.post("/v1/live/stop", operation_id="liveStop")
+    async def live_stop(request: Request, agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        res = LIVE.stop()
+        relay.audit.write("live_stop", agent=agent.name, ip=ip, via="rest", result="stopped")
+        return res
 
     @app.websocket("/v1/sessions")
     async def sessions(ws: WebSocket):
@@ -590,6 +641,10 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
     @app.get("/pwa", include_in_schema=False)
     async def pwa_page():
         return HTMLResponse((_pwa / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/overlay", include_in_schema=False)
+    async def overlay_page():
+        return HTMLResponse((_pwa / "overlay.html").read_text(encoding="utf-8"))
 
     @app.get("/pwa/manifest.webmanifest", include_in_schema=False)
     async def pwa_manifest():

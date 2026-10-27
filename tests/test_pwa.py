@@ -23,7 +23,7 @@ def test_pwa_shell_served(tmp_path):
     c = _client(tmp_path)
     r = c.get("/pwa")
     assert r.status_code == 200
-    for marker in ("FieldKit", "Begin mission", "Hermes Jot synced", "jot down"):
+    for marker in ("FieldKit", "Begin mission", "Hermes Jot Checklist Sync", "jot down", "Next step", "Use test scenes", "#06070a", "Watches what changed"):
         assert marker in r.text
     m = c.get("/pwa/manifest.webmanifest")
     assert m.status_code == 200 and m.json()["short_name"] == "FieldKit"

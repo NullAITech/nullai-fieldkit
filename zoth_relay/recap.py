@@ -114,11 +114,15 @@ def local_card_svg(mission) -> bytes:
     return svg.encode("utf-8")
 
 
-async def maybe_recap(mission, transport: httpx.AsyncBaseTransport | None = None) -> dict:
-    """Attach a recap card once a mission completes. Best effort."""
-    if not mission.complete:
+async def maybe_recap(mission, transport: httpx.AsyncBaseTransport | None = None,
+                      force: bool = False) -> dict:
+    """Attach a recap card once a mission completes. Best effort.
+
+    force=True (explicit POST /v1/missions/{id}/recap) regenerates even for
+    an in-progress mission."""
+    if not mission.complete and not force:
         return {"ok": False, "detail": "mission not complete"}
-    if getattr(mission, "recap", ""):
+    if getattr(mission, "recap", "") and not force:
         return {"ok": True, "recap": mission.recap, "source": "existing"}
     from . import jot_bridge, second_brain
     img = await generate_image(mission, transport)

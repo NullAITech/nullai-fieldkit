@@ -52,6 +52,7 @@ class Mission:
     steps: list[Step] = field(default_factory=list)
     jot_id: str = ""                 # Hermes Jot checklist note mirroring this mission
     recap: str = ""                  # recap card filename in the vault (set on completion)
+    last_event: str = ""             # last typed step event (overlay safety badge)
 
     @property
     def current(self) -> int:
@@ -77,7 +78,8 @@ class Mission:
                 "steps": [s.public(i + 1) for i, s in enumerate(self.steps)],
                 "current": self.current, "complete": self.complete,
                 "step": self.current_step_text,
-                "jot_note_id": self.jot_id}
+                "jot_note_id": self.jot_id, "last_event": self.last_event,
+                "recap": self.recap}
 
 
 class MissionStore:
@@ -103,6 +105,7 @@ class MissionStore:
     def apply_event(self, mission_id: str, event: str) -> Mission:
         """advance: active->done; skip: active->skipped. Next pending activates."""
         m = self._by_id[mission_id]
+        m.last_event = "advanced" if event == "advance" else "skipped"
         for s in m.steps:
             if s.status == "active":
                 s.status = "done" if event == "advance" else "skipped"

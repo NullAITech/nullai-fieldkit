@@ -238,6 +238,7 @@ class Session:
             ev = await assess_step(self.provider, m, observation, self.transport)
         except Exception:
             return False
+        m.last_event = ev.type
         if ev.type == "step_done":
             done_n = m.current
             self._mission_store.apply_event(m.id, "advance")

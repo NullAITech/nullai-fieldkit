@@ -85,6 +85,17 @@ def _register(mcp: FastMCP, backend: Callable[[str, dict, Context | None], Await
     async def recall_second_brain(query: str, ctx: Context) -> dict[str, Any]:
         return await backend("recall_second_brain", {"query": query}, ctx)
 
+    @mcp.tool(description="FIELDKIT LIVE: go live (OBS overlay / X). PUBLIC action, "
+                          "confirm-gated: first call returns a confirm_token; only a repeat "
+                          "call with confirm=<token> starts. Audited either way.")
+    async def stream_start(ctx: Context, confirm: str | None = None,
+                           destination: str | None = None) -> dict[str, Any]:
+        return await backend("stream_start", {"confirm": confirm, "destination": destination}, ctx)
+
+    @mcp.tool(description="FIELDKIT LIVE: stop the live stream. Audited.")
+    async def stream_stop(ctx: Context) -> dict[str, Any]:
+        return await backend("stream_stop", {}, ctx)
+
 
 async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str, via: str):
     """FIELDKIT agent tools (Beat 3): see_now / say / mission_status / advance_step."""
@@ -143,6 +154,16 @@ async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str,
     if op == "recall_second_brain":
         from . import second_brain
         return {"ok": True, "hints": second_brain.prior_hints(args.get("query") or "")}
+    if op in ("stream_start", "stream_stop"):
+        from .live_mode import LIVE
+        if op == "stream_start":
+            res = LIVE.start(args.get("confirm") or None, args.get("destination") or "")
+        else:
+            res = LIVE.stop()
+        relay.audit.write("live_" + ("start" if op == "stream_start" else "stop"),
+                          agent=agent.name, ip=ip, via=via,
+                          result="live" if res.get("ok") else "needs_confirm")
+        return res
     # see_now
     got = FRAMES.latest(agent.name)
     if got is None:
@@ -180,7 +201,8 @@ def _local_backend(relay: Relay, fixed_agent: Agent | None):
         via = "mcp"
         try:
             if op in ("see_now", "say", "mission_status", "advance_step",
-                      "jot_field_note", "jot_mission_sync", "recall_second_brain"):
+                      "jot_field_note", "jot_mission_sync", "recall_second_brain",
+                      "stream_start", "stream_stop"):
                 return await _fieldkit_op(relay, agent, op, args, ip, via)
             if op == "status":
                 return relay.status(agent, ip, via)
@@ -237,7 +259,8 @@ def build_bridge(url: str, token: str) -> FastMCP:
                     return {"ok": True, "mission": r.json()}
             else:
                 r = await client.post(f"/v1/missions/{mid}/events", json={"type": "advance"})
-        elif op in ("see_now", "say", "jot_field_note", "jot_mission_sync"):
+        elif op in ("see_now", "say", "jot_field_note", "jot_mission_sync",
+                    "stream_start", "stream_stop"):
             raise ValueError(f"{op} needs a direct MCP connection to the relay (live session state)")
         elif op == "recall_second_brain":
             from . import second_brain
