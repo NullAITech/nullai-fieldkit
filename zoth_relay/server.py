@@ -13,9 +13,9 @@ import uuid
 
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
-from .missions import MissionError, MissionStore, assess_step, plan_checklist
+from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_checklist
 from .providers import provider_presets
-from .sessions import Session
+from .sessions import ACTIVE_SESSIONS, Session
 from .trio import Advisor, Director, Eyes
 from .live import LiveError, mint_token
 from .guide import Guide
@@ -331,10 +331,9 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
 
     # -------------------------------- FIELDKIT sessions/missions (Sessions: D2; Missions: D3)
     def missions_store() -> MissionStore:
-        st = getattr(app.state, "missions", None)
-        if st is None:
-            st = app.state.missions = MissionStore()
-        return st
+        # Tests may inject an isolated store; production shares the module
+        # singleton so REST, sessions and MCP all see the same missions.
+        return getattr(app.state, "missions", None) or MISSIONS
 
     def fieldkit_providers() -> dict:
         ps = getattr(app.state, "session_providers", None)
@@ -437,7 +436,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                                 "detail": f"provider '{name}' is not configured on this relay"})
             await ws.close(code=1000)
             return
-        sess = Session(provider, ws.send_json, getattr(app.state, "session_transport", None))
+        sess = Session(provider, ws.send_json, getattr(app.state, "session_transport", None),
+                       agent_name=agent.name)
         sess.set_hello(str(hello.get("mission") or "")[:2000], str(hello.get("system") or "")[:4000],
                        hello.get("history_budget"))
         mid = str(hello.get("mission_id") or "")
@@ -455,6 +455,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                            str(hello.get("preset") or "") or None, custom,
                            bool(hello.get("allow_outside", False)))
             sess.start_proactive()
+        ACTIVE_SESSIONS[agent.name] = sess
         # counts/ids only: frames, speech and replies are never logged
         relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="open", provider=name)
         ready = {"type": "ready", "provider": name, **provider.public(),
@@ -506,6 +507,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         except (WebSocketDisconnect, RuntimeError, ValueError):
             pass
         finally:
+            if ACTIVE_SESSIONS.get(agent.name) is sess:
+                ACTIVE_SESSIONS.pop(agent.name, None)
             await sess.close()
             relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="closed",
                               turns=sess.turns, frames=sess.frames_received,

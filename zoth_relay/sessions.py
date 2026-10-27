@@ -50,6 +50,24 @@ MIN_HISTORY_BUDGET = 500
 MAX_HISTORY_BUDGET = 200_000
 
 
+class FrameStore:
+    """Latest changed frame per agent, for MCP see_now. Memory only."""
+
+    def __init__(self):
+        self._latest: dict[str, tuple[bytes, str, float]] = {}
+
+    def put(self, agent: str, jpeg: bytes, mime: str) -> None:
+        if agent:
+            self._latest[agent] = (jpeg, mime, time.time())
+
+    def latest(self, agent: str) -> tuple[bytes, str, float] | None:
+        return self._latest.get(agent or "")
+
+
+FRAMES = FrameStore()
+ACTIVE_SESSIONS: dict[str, "Session"] = {}   # agent name -> live session (for MCP say)
+
+
 class BoundedContext:
     """Char-capped transcript. Oldest turns drop first; never grows unbounded."""
 
@@ -75,8 +93,9 @@ class Session:
     """One connected client session, routed to one provider."""
 
     def __init__(self, provider: Provider, send, transport: httpx.AsyncBaseTransport | None = None,
-                 history_budget: int = DEFAULT_HISTORY_BUDGET):
+                 history_budget: int = DEFAULT_HISTORY_BUDGET, agent_name: str = ""):
         self.provider, self.send, self.transport = provider, send, transport
+        self.agent_name = agent_name
         self.ctx = BoundedContext(history_budget)
         self.mission = ""
         self.system = ""
@@ -268,9 +287,18 @@ class Session:
             self._last_hash = h
             self._pending_frame = (raw, mime)
             self.frames_changed += 1
+            FRAMES.put(self.agent_name, raw, mime)
 
     def on_clip(self, video_url: str) -> None:
         self._pending_clip = video_url or None
+
+    async def say_direct(self, text: str) -> None:
+        """Speak a line into this live session (MCP say)."""
+        text = (text or "").strip()[:300]
+        if not text or self.closed:
+            return
+        self.ctx.add("assistant", text)
+        await self.send({"type": "say", "text": text, "reason": "agent"})
 
     async def barge(self) -> None:
         self.gen += 1

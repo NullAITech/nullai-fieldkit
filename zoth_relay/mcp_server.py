@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, Awaitable, Callable
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -51,6 +52,68 @@ def _register(mcp: FastMCP, backend: Callable[[str, dict, Context | None], Await
         return await backend("run_command", {"command": command, "working_directory": working_directory,
                                              "timeout": timeout}, ctx)
 
+    @mcp.tool(description="FIELDKIT: what your agent's glasses/phone camera sees right now "
+                          "(deduped Eyes observation of the latest live frame; silent if unchanged).")
+    async def see_now(ctx: Context) -> dict[str, Any]:
+        return await backend("see_now", {}, ctx)
+
+    @mcp.tool(description="FIELDKIT: current mission state (checklist + current step). "
+                          "Omit mission_id for the latest mission.")
+    async def mission_status(ctx: Context, mission_id: str | None = None) -> dict[str, Any]:
+        return await backend("mission_status", {"mission_id": mission_id}, ctx)
+
+    @mcp.tool(description="FIELDKIT: mark the current mission step done; returns the next step to say.")
+    async def advance_step(ctx: Context, mission_id: str | None = None) -> dict[str, Any]:
+        return await backend("advance_step", {"mission_id": mission_id}, ctx)
+
+    @mcp.tool(description="FIELDKIT: speak a short line into your agent's live Spotter session.")
+    async def say(text: str, ctx: Context) -> dict[str, Any]:
+        return await backend("say", {"text": text}, ctx)
+
+
+async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str, via: str):
+    """FIELDKIT agent tools (Beat 3): see_now / say / mission_status / advance_step."""
+    from .missions import MISSIONS
+    from .providers import provider_presets
+    from .sessions import ACTIVE_SESSIONS, FRAMES
+    from .trio import Eyes
+
+    # Same senses-vs-hands scopes as REST/WS: sessions/missions caps gate these.
+    if op in ("see_now", "say"):
+        relay.check_sessions(agent, ip, via)
+    else:
+        relay.check_missions(agent, ip, via)
+    relay.audit.write("fieldkit", agent=agent.name, ip=ip, via=via, op=op)
+
+    if op in ("mission_status", "advance_step"):
+        mid = args.get("mission_id")
+        m = MISSIONS.get(mid) if mid else MISSIONS.latest()
+        if m is None:
+            return {"ok": False, "detail": "no such mission" if mid else "no missions yet"}
+        if op == "mission_status":
+            return {"ok": True, "mission": m.public()}
+        MISSIONS.apply_event(m.id, "advance")
+        return {"ok": True, "event": "advanced",
+                "say": m.current_step_text or "Mission complete.", "mission": m.public()}
+    if op == "say":
+        sess = ACTIVE_SESSIONS.get(agent.name)
+        if sess is None or sess.closed:
+            return {"ok": False, "detail": "no live session for this agent"}
+        await sess.say_direct(args.get("text") or "")
+        return {"ok": True}
+    # see_now
+    got = FRAMES.latest(agent.name)
+    if got is None:
+        return {"ok": False, "detail": "no live frame for this agent yet"}
+    raw, mime, ts = got
+    provider = provider_presets().get("spark")
+    if provider is None or not provider.configured:
+        return {"ok": False, "detail": "vision provider not configured on this relay"}
+    sess = ACTIVE_SESSIONS.get(agent.name)
+    obs = await Eyes(provider).observe((raw, mime), sess._mission_text() if sess else "")
+    return {"ok": True, "observation": obs.text if obs else "",
+            "silent": obs is None, "frame_age_s": round(time.time() - ts, 1)}
+
 
 def _local_backend(relay: Relay, fixed_agent: Agent | None):
     def agent_for(ctx: Context | None) -> tuple[Agent, str]:
@@ -74,6 +137,8 @@ def _local_backend(relay: Relay, fixed_agent: Agent | None):
         agent, ip = agent_for(ctx)
         via = "mcp"
         try:
+            if op in ("see_now", "say", "mission_status", "advance_step"):
+                return await _fieldkit_op(relay, agent, op, args, ip, via)
             if op == "status":
                 return relay.status(agent, ip, via)
             if op == "read_file":
@@ -119,6 +184,18 @@ def build_bridge(url: str, token: str) -> FastMCP:
             r = await client.get("/v1/dir", params={k: v for k, v in args.items() if v})
         elif op == "run_command":
             r = await client.post("/v1/exec/run", json={k: v for k, v in args.items() if v is not None})
+        elif op in ("mission_status", "advance_step"):
+            mid = args.get("mission_id")
+            if not mid:
+                raise ValueError(f"{op} over the bridge needs an explicit mission_id")
+            if op == "mission_status":
+                r = await client.get(f"/v1/missions/{mid}")
+                if r.status_code < 400:
+                    return {"ok": True, "mission": r.json()}
+            else:
+                r = await client.post(f"/v1/missions/{mid}/events", json={"type": "advance"})
+        elif op in ("see_now", "say"):
+            raise ValueError(f"{op} needs a direct MCP connection to the relay (live session state)")
         else:
             raise ValueError(op)
         if r.status_code >= 400:

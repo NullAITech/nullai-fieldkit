@@ -143,7 +143,8 @@ async def test_mcp_in_process_tools(env):
     srv = build_mcp(relay, alpha)
     async with create_connected_server_and_client_session(srv._mcp_server) as s:
         names = {t.name for t in (await s.list_tools()).tools}
-        assert names == {"run_command", "read_file", "write_file", "list_dir", "status"}
+        assert names == {"run_command", "read_file", "write_file", "list_dir", "status",
+                         "see_now", "say", "mission_status", "advance_step"}
         r = await s.call_tool("write_file", {"path": "m.txt", "content": "from-mcp"})
         assert not r.isError
         r = await s.call_tool("read_file", {"path": "m.txt"})

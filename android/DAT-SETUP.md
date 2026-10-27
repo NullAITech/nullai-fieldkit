@@ -20,14 +20,20 @@ glasses app did: through the **Meta AI app** on this phone, using Meta's
 
 ## What Neal must do once (Meta-side)
 
-1. Register the app in the **Wearables Developer Center** and get its
-   APPLICATION_ID.
-2. Build with it: `./gradlew assembleDebug -PmwdatAppId=<YOUR_ID>`
-   (placeholder in the manifest until then; DAT sessions will refuse).
-3. In the **Meta AI app**: pair the glasses, enable **Developer Mode**, and
-   make sure the glasses' DAT app is up to date.
-4. In FieldKit: choose **Meta glasses** → **Connect glasses** → finish the
-   registration in Meta AI → tap **Connect glasses** again.
+Fast path (hackathon, works today):
+
+1. Build with the Developer Mode id: `./gradlew assembleDebug -PmwdatAppId=0`
+   (`0` is DAT's documented Developer Mode APPLICATION_ID).
+2. In the **Meta AI app**: pair the glasses and enable **Developer Mode** in
+   the glasses' device settings.
+3. In Spotter: choose **Meta glasses** → **Connect glasses** → approve the
+   registration in Meta AI if prompted → tap **Connect glasses** again.
+
+Production path (later): register the app in the
+[Wearables Developer Center](https://wearables.developer.meta.com/)
+(create a project — see `docs/manage-projects` there), then build with the
+real id: `./gradlew assembleDebug -PmwdatAppId=<YOUR_ID>`. Without either
+`0`+Developer Mode or a real id, DAT refuses with "no eligible device".
 
 ## Honest status
 

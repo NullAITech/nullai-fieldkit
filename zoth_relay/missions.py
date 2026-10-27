@@ -80,6 +80,10 @@ class Mission:
 class MissionStore:
     def __init__(self):
         self._by_id: dict[str, Mission] = {}
+        self._last_id = ""
+
+    def latest(self) -> Mission | None:
+        return self._by_id.get(self._last_id)
 
     def create(self, goal: str, step_texts: list[str], provider: str = "") -> Mission:
         steps = [Step(t) for t in step_texts]
@@ -87,6 +91,7 @@ class MissionStore:
             steps[0].status = "active"
         m = Mission(id=uuid.uuid4().hex[:12], goal=goal, provider=provider, steps=steps)
         self._by_id[m.id] = m
+        self._last_id = m.id
         return m
 
     def get(self, mission_id: str) -> Mission | None:
@@ -104,6 +109,9 @@ class MissionStore:
                 s.status = "active"
                 break
         return m
+
+
+MISSIONS = MissionStore()   # shared store: REST, sessions and MCP see one truth
 
 
 def parse_checklist(text: str) -> list[str]:
