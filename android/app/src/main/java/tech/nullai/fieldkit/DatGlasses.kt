@@ -66,6 +66,24 @@ object DatGlasses {
     fun isRegistered(): Boolean =
         Wearables.registrationState.value == RegistrationState.REGISTERED
 
+    /** What the SDK itself sees — named in the status line so failures explain themselves. */
+    fun diagnostics(): String {
+        val ids = Wearables.devices.value
+        val parts = StringBuilder(
+            "reg=${registrationState()} devMode=${Wearables.isDevMode} devices=${ids.size}"
+        )
+        for (id in ids) {
+            val d = Wearables.devicesMetadata[id]?.value
+            if (d != null) {
+                parts.append(" [${d.name} link=${d.linkState} compat=${d.compatibility}" +
+                    " don=${d.donState} hinge=${d.hingeState} batt=${d.batteryLevel}%]")
+            } else {
+                parts.append(" [$id]")
+            }
+        }
+        return parts.toString()
+    }
+
     fun connect() {
         if (job?.isActive == true) return
         frameCount = 0
@@ -78,11 +96,29 @@ object DatGlasses {
                 return@launch
             }
             try {
-                listener?.onStatus("Opening Meta glasses session…")
+                listener?.onStatus("Opening Meta glasses session… ${diagnostics()}")
+                if (!Wearables.isDevMode) {
+                    listener?.onStatus(
+                        "DAT Developer Mode binding is off (${diagnostics()}). " +
+                            "This often resets when Spotter is reinstalled. In the Meta AI app, " +
+                            "open your glasses > Developer Mode and make sure Spotter is enabled there. " +
+                            "Do not toggle Developer Mode off/on."
+                    )
+                    return@launch
+                }
+                if (Wearables.devices.value.isEmpty()) {
+                    listener?.onStatus(
+                        "SDK sees no glasses device (${diagnostics()}). Keep the glasses out of " +
+                            "the case, unfolded and worn, with Meta AI showing them connected, then retry."
+                    )
+                    return@launch
+                }
                 val created = Wearables.createSession(AutoDeviceSelector())
                 val sess = created.getOrNull()
                 if (sess == null) {
-                    listener?.onStatus("No eligible glasses device: ${created.errorOrNull()}")
+                    listener?.onStatus(
+                        "No eligible glasses device: ${created.errorOrNull()} (${diagnostics()})"
+                    )
                     return@launch
                 }
                 session = sess
