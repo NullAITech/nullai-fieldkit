@@ -20,6 +20,34 @@
             android:textSize="28sp"
             android:textStyle="bold" />
 
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:importantForAccessibility="no"
+                android:text="⠎⠏⠕⠞⠞⠑⠗"
+                android:textColor="#8a8f98"
+                android:textSize="15sp"
+                android:letterSpacing="0.12" />
+
+            <TextView
+                android:id="@+id/brailleSpin"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:importantForAccessibility="no"
+                android:text="⠋"
+                android:textColor="#b88e26"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -47,7 +75,13 @@
             android:layout_width="match_parent"
             android:layout_height="24dp"
             android:layout_marginTop="8dp"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="8dp" />
+
+        <tech.nullai.fieldkit.BrailleStripView
+            android:layout_width="match_parent"
+            android:layout_height="24dp"
+            android:layout_marginBottom="16dp"
+            android:importantForAccessibility="no" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -93,6 +127,7 @@
 
             <TextureView
                 android:id="@+id/preview"
+                android:contentDescription="Live camera preview"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
@@ -107,6 +142,7 @@
 
             <Button
                 android:id="@+id/btnFull"
+            android:contentDescription="Open full screen preview"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="top|end"
@@ -115,6 +151,7 @@
 
             <Button
                 android:id="@+id/btnFab"
+            android:contentDescription="Open Spotter options menu"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
                 android:layout_gravity="bottom|end"
@@ -240,7 +277,7 @@
                 android:id="@+id/btnMission"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Start"
+                android:text="▶ Start"
                 android:textColor="#FFFFFF"
                 android:background="@drawable/bg_btn_dark"
                 android:layout_marginStart="8dp" />
@@ -263,29 +300,32 @@
 
             <Button
                 android:id="@+id/btnTalk"
+                android:minHeight="48dp"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Talk"
+                android:text="◉ Talk"
                 android:textColor="#111111"
                 android:background="@drawable/bg_btn_light" />
 
             <Button
                 android:id="@+id/btnShh"
+                android:minHeight="48dp"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Shh"
+                android:text="⏸ Shh"
                 android:textColor="#111111"
                 android:background="@drawable/bg_btn_light"
                 android:layout_marginStart="8dp" />
 
             <Button
                 android:id="@+id/btnNext"
+                android:minHeight="48dp"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Done — next step"
+                android:text="✔ Done — next step"
                 android:textColor="#FFFFFF"
                 android:background="@drawable/bg_btn_dark"
                 android:layout_marginStart="8dp" />

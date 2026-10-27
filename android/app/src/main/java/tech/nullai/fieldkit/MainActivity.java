@@ -177,6 +177,18 @@ public class MainActivity extends Activity {
         hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
         qrReader.setHints(hints);
 
+        final TextView brailleSpin = findViewById(R.id.brailleSpin);
+        final String[] frames = {"⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"};
+        final android.os.Handler spinH = new android.os.Handler(android.os.Looper.getMainLooper());
+        final int[] fi = {0};
+        final Runnable spin = new Runnable() {
+            @Override public void run() {
+                if (brailleSpin != null) brailleSpin.setText(frames[fi[0] % frames.length]);
+                fi[0]++;
+                spinH.postDelayed(this, 110);
+            }
+        };
+        spinH.post(spin);
         btnFab = findViewById(R.id.btnFab);
         btnFull = findViewById(R.id.btnFull);
         btnFull.setOnClickListener(v -> setFullscreen(true));
@@ -184,7 +196,7 @@ public class MainActivity extends Activity {
         btnPreset = findViewById(R.id.btnPreset);
         btnPreset.setOnClickListener(v -> {
             presetIdx = (presetIdx + 1) % PRESETS.length;
-            btnPreset.setText("Preset: " + PRESETS[presetIdx][1]);
+            btnPreset.setText("◈ Preset: " + PRESETS[presetIdx][1]);
             try {
                 JSONObject m = new JSONObject();
                 m.put("type", "preset");
@@ -454,7 +466,7 @@ public class MainActivity extends Activity {
                         final String reviewText = review.toString().trim();
                         runOnUiThread(() -> {
                             tvStep.setText(reviewText);
-                            btnMission.setText("Begin");
+                            btnMission.setText("▶ Begin");
                         });
                         speak("Plan ready. Review the steps, then tap Begin when you're ready.");
                         status("Planned with Wonder. Edit the goal + Start to re-plan, or Begin.");
@@ -549,7 +561,7 @@ public class MainActivity extends Activity {
         // Next button remains only as a manual override.
         missionId = pendingMissionId;
         pendingMissionId = "";
-        btnMission.setText("Start");
+        btnMission.setText("▶ Start");
         tvStep.setText("Step 1/" + pendingTotal + ": " + pendingFirst);
         speak("Mission ready. Step one: " + pendingFirst);
         status("Mission started. Reconnecting session to attach it…");

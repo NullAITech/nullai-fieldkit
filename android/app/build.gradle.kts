@@ -11,8 +11,8 @@ android {
         applicationId = "tech.nullai.fieldkit"
         minSdk = 30
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.2.6"
+        versionCode = 9
+        versionName = "0.2.7"
         // Meta Wearables Developer Center app id. Override with -PmwdatAppId=<id>.
         // Stored as a string resource (not a manifest placeholder): aapt types
         // a bare "0" as an integer and the DAT SDK then cannot read it.
