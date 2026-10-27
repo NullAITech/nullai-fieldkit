@@ -70,6 +70,21 @@ def _register(mcp: FastMCP, backend: Callable[[str, dict, Context | None], Await
     async def say(text: str, ctx: Context) -> dict[str, Any]:
         return await backend("say", {"text": text}, ctx)
 
+    @mcp.tool(description="FIELDKIT: append a hands-free field note ('jot this down: ...') "
+                          "to the active mission's Hermes Jot checklist note.")
+    async def jot_field_note(text: str, ctx: Context, mission_id: str | None = None) -> dict[str, Any]:
+        return await backend("jot_field_note", {"text": text, "mission_id": mission_id}, ctx)
+
+    @mcp.tool(description="FIELDKIT: create or refresh the Hermes Jot checklist note for a "
+                          "mission, ticking every completed step.")
+    async def jot_mission_sync(ctx: Context, mission_id: str | None = None) -> dict[str, Any]:
+        return await backend("jot_mission_sync", {"mission_id": mission_id}, ctx)
+
+    @mcp.tool(description="FIELDKIT: recall prior-job field notes from the Obsidian Second "
+                          "Brain (+ Jot) matching this goal/equipment, before planning.")
+    async def recall_second_brain(query: str, ctx: Context) -> dict[str, Any]:
+        return await backend("recall_second_brain", {"query": query}, ctx)
+
 
 async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str, via: str):
     """FIELDKIT agent tools (Beat 3): see_now / say / mission_status / advance_step."""
@@ -83,6 +98,7 @@ async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str,
         relay.check_sessions(agent, ip, via)
     else:
         relay.check_missions(agent, ip, via)
+
     relay.audit.write("fieldkit", agent=agent.name, ip=ip, via=via, op=op)
 
     if op in ("mission_status", "advance_step"):
@@ -92,8 +108,15 @@ async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str,
             return {"ok": False, "detail": "no such mission" if mid else "no missions yet"}
         if op == "mission_status":
             return {"ok": True, "mission": m.public()}
+        done_n = m.current
         MISSIONS.apply_event(m.id, "advance")
-        return {"ok": True, "event": "advanced",
+        from . import jot_bridge, second_brain
+        jot_res = await jot_bridge.checkoff(m.id, done_n)
+        try:
+            second_brain.compile_mission(m)
+        except Exception:
+            pass
+        return {"ok": True, "event": "advanced", "jot": jot_res,
                 "say": m.current_step_text or "Mission complete.", "mission": m.public()}
     if op == "say":
         sess = ACTIVE_SESSIONS.get(agent.name)
@@ -101,6 +124,24 @@ async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str,
             return {"ok": False, "detail": "no live session for this agent"}
         await sess.say_direct(args.get("text") or "")
         return {"ok": True}
+    if op == "jot_field_note":
+        from . import jot_bridge
+        mid = args.get("mission_id")
+        m = MISSIONS.get(mid) if mid else MISSIONS.latest()
+        if m is None:
+            return {"ok": False, "detail": "no mission to jot against"}
+        step = f"Step {m.current}: {m.current_step_text}" if m.current_step_text else ""
+        return await jot_bridge.append_field_note(m.id, args.get("text") or "", step)
+    if op == "jot_mission_sync":
+        from . import jot_bridge
+        mid = args.get("mission_id")
+        m = MISSIONS.get(mid) if mid else MISSIONS.latest()
+        if m is None:
+            return {"ok": False, "detail": "no such mission" if mid else "no missions yet"}
+        return await jot_bridge.sync_mission(m)
+    if op == "recall_second_brain":
+        from . import second_brain
+        return {"ok": True, "hints": second_brain.prior_hints(args.get("query") or "")}
     # see_now
     got = FRAMES.latest(agent.name)
     if got is None:
@@ -137,7 +178,8 @@ def _local_backend(relay: Relay, fixed_agent: Agent | None):
         agent, ip = agent_for(ctx)
         via = "mcp"
         try:
-            if op in ("see_now", "say", "mission_status", "advance_step"):
+            if op in ("see_now", "say", "mission_status", "advance_step",
+                      "jot_field_note", "jot_mission_sync", "recall_second_brain"):
                 return await _fieldkit_op(relay, agent, op, args, ip, via)
             if op == "status":
                 return relay.status(agent, ip, via)
@@ -194,8 +236,11 @@ def build_bridge(url: str, token: str) -> FastMCP:
                     return {"ok": True, "mission": r.json()}
             else:
                 r = await client.post(f"/v1/missions/{mid}/events", json={"type": "advance"})
-        elif op in ("see_now", "say"):
+        elif op in ("see_now", "say", "jot_field_note", "jot_mission_sync"):
             raise ValueError(f"{op} needs a direct MCP connection to the relay (live session state)")
+        elif op == "recall_second_brain":
+            from . import second_brain
+            return {"ok": True, "hints": second_brain.prior_hints(args.get("query") or "")}
         else:
             raise ValueError(op)
         if r.status_code >= 400:

@@ -42,7 +42,7 @@ import uuid
 import httpx
 
 from .ask import AskError, decode_image
-from .missions import assess_step
+from .missions import assess_step, jot_command_text
 from .providers import Provider, Turn
 from .trio import Advisor, Director, Eyes, Preset, custom_preset, get_preset
 
@@ -239,7 +239,15 @@ class Session:
         except Exception:
             return False
         if ev.type == "step_done":
+            done_n = m.current
             self._mission_store.apply_event(m.id, "advance")
+            # Hands-free mirror updates: Jot ticks itself, engram refreshes.
+            from . import jot_bridge, second_brain
+            await jot_bridge.checkoff(m.id, done_n)
+            try:
+                second_brain.compile_mission(m)
+            except Exception:
+                pass
             nxt = m.current_step_text
             text = ev.say or (f"Next: {nxt}" if nxt else "Mission complete.")
             self.ctx.add("assistant", text)
@@ -305,7 +313,23 @@ class Session:
             return
         if self.paused and speaker == "wearer":
             self.set_paused(False)  # wearer talking again resumes coaching
+        jot_text = jot_command_text(text)
+        if jot_text is not None and speaker == "wearer":
+            await self.jot_down(jot_text)
+            return
         self.start_turn(text, "speech")
+
+    async def jot_down(self, text: str) -> dict:
+        """Voice 'jot this down': append a field note to the mission's Jot note."""
+        from . import jot_bridge
+        m = self._mission()
+        step_label = ""
+        if m is not None and m.current_step_text:
+            step_label = f"Step {m.current}: {m.current_step_text}"
+        res = await jot_bridge.append_field_note(m.id if m else "", text, step_label)
+        said = "Jotted." if res.get("ok") else "Jot is off or unavailable — note not saved."
+        await self.send({"type": "say", "text": said, "reason": "jot"})
+        return res
 
     async def close(self) -> None:
         self.closed = True

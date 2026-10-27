@@ -55,6 +55,11 @@ These parts are new for the Meta Global AI Developer Hackathon:
 - **Bounded memory** — the plan and current step stay in front; old chatter does not pile up.
 - **Missions API** — one sentence becomes a checklist; steps can advance, skip, or be checked.
 - **Typed step tracking** — the system records `step_done`, `off_track`, and `unsafe` as real events, not guesses scraped from prose.
+- **It knows when a step is done** — the proactive Eyes → Advisor → Director coach judges each new view against the current step and speaks the next one itself. No Next button (kept only as a manual override).
+- **Agent tools over MCP** — any coding agent can call `see_now`, `say`, `mission_status`, `advance_step`, `jot_field_note`, `jot_mission_sync`, and `recall_second_brain` against the same live session.
+- **Hermes Jot live checklist** — creating a mission creates a Jot note; as steps complete, the checklist ticks itself off while your hands stay on the work. Say “jot down: …” and the observation lands on the note with its step context.
+- **Obsidian Second Brain** — every mission compiles into a vault engram with a live progress record, and prior jobs are recalled before planning: “last time on step 3, you noted the left bolt was stripped.”
+- **Muse Spark Open preset** — Meta's open-weight Spark (`meta-models/muse-spark-open-1026`) as an env-gated provider for partner hosts (Baseten/Modal), beside the Meta API default.
 
 What already existed is listed plainly in [PRIOR-WORK.md](PRIOR-WORK.md). The demo only claims the new work.
 
@@ -85,7 +90,7 @@ FieldKit is designed around a simple rule: **watching is not the same as acting.
 
 ## Status
 
-Hackathon build, developer preview. Working today: the server backbone (providers, live sessions, missions, typed step tracking, the Eyes/Advisor/Director guide trio with presets, tests, and live soak checks) and the Spotter Android app (phone camera, QR pairing, missions, voice in/out, compass and sound-direction estimates, Meta glasses via the Wearables DAT video stream). Still being connected: live mode to X, agent tools over MCP, and the phone-only web trial.
+Hackathon build, developer preview. Working today: the server backbone (providers, live sessions, missions, typed step tracking, the Eyes/Advisor/Director guide trio with presets, automatic step advance, MCP agent tools, Hermes Jot sync and Obsidian Second Brain engrams, tests, and live soak checks) and the Spotter Android app (phone camera, QR pairing, plan-review-then-Begin missions, voice in/out, compass and sound-direction estimates, Meta glasses via the Wearables DAT video stream with Meta AI permission flow). Still being connected: live mode to X and the phone-only web trial.
 
 Repository history in this public repo is curated on purpose: the first commit is a frozen snapshot of what existed before the hackathon; later commits show only the new FieldKit work in order. Internal provenance is preserved separately by NullAI.
 

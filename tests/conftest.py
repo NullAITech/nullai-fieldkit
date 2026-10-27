@@ -1,8 +1,15 @@
+import os
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
+
+# FieldKit mirrors (Hermes Jot + Obsidian vault) must never touch the
+# operator's real stores from tests. tmp defaults; bridge tests override.
+_TEST_SANDBOX = Path(os.environ.get("TMPDIR", "/tmp")) / "fieldkit-test-sandbox"
+os.environ.setdefault("FIELDKIT_JOT_DIR", str(_TEST_SANDBOX / "jot"))
+os.environ.setdefault("FIELDKIT_VAULT_DIR", str(_TEST_SANDBOX / "vault"))
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from zoth_relay.config import hash_token, load_config  # noqa: E402

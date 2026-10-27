@@ -80,6 +80,16 @@ async def test_anthropic_transport_parses_text_deltas(monkeypatch):
     assert block["type"] == "image" and block["source"]["media_type"] == "image/png"
 
 
+def test_spark_open_preset_is_open_weights_and_env_gated(monkeypatch):
+    monkeypatch.delenv("SPARK_OPEN_API_KEY", raising=False)
+    presets = provider_presets()
+    p = presets["spark-open"]
+    assert p.model == "meta-models/muse-spark-open-1026"
+    assert not p.configured                       # no partner key -> never routed
+    monkeypatch.setenv("SPARK_OPEN_API_KEY", "partner-key")
+    assert provider_presets()["spark-open"].configured
+
+
 def test_presets_register_spark_wonder_local(monkeypatch):
     monkeypatch.delenv("META_API_KEY", raising=False)
     presets = provider_presets()

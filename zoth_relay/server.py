@@ -13,6 +13,7 @@ import uuid
 
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
+from . import jot_bridge, second_brain
 from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_checklist
 from .providers import provider_presets
 from .sessions import ACTIVE_SESSIONS, Session
@@ -351,9 +352,16 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             raise HTTPException(404, f"unknown provider '{name}'")
         if not provider.configured:
             raise HTTPException(503, f"provider '{name}' is not configured on this relay")
+        # Prior-job memory recall (Second Brain + Jot): last time's field
+        # notes inform this plan. Best effort; recall never blocks planning.
+        try:
+            hints = second_brain.prior_hints(body.goal.strip())
+        except Exception:
+            hints = []
         try:
             steps = await plan_checklist(provider, body.goal.strip(),
-                                         getattr(app.state, "session_transport", None))
+                                         getattr(app.state, "session_transport", None),
+                                         hints=[h["note"] for h in hints])
         except MissionError as e:
             relay.audit.write("mission_create", agent=agent.name, ip=ip, via="rest",
                               result="error", status=e.status, provider=name)
@@ -362,7 +370,17 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         # ids + counts only: goals and steps are never written to the audit log
         relay.audit.write("mission_create", agent=agent.name, ip=ip, via="rest", result="ok",
                           mission=m.id, provider=name, steps=len(steps))
-        return JSONResponse(m.public(), status_code=201)
+        # Mirrors: Hermes Jot live checklist + Obsidian engram. Both are
+        # best-effort mirrors — the mission is the source of truth.
+        jot_res = await jot_bridge.sync_new_mission(m)
+        try:
+            second_brain.compile_mission(m)
+        except Exception:
+            pass
+        out = m.public()
+        out["jot"] = jot_res
+        out["prior_notes"] = hints
+        return JSONResponse(out, status_code=201)
 
     @app.get("/v1/missions/{mission_id}", operation_id="getMission")
     async def get_mission(request: Request, mission_id: str, agent: Agent = Depends(auth)):
@@ -381,10 +399,14 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         m = store.get(mission_id)
         if m is None:
             raise HTTPException(404, "unknown mission")
+        done_n = m.current
+        jot_res = None
         if body.type in ("advance", "skip"):
             store.apply_event(mission_id, body.type)
             say = m.current_step_text or "Mission complete."
             ev_name = "advanced" if body.type == "advance" else "skipped"
+            if body.type == "advance":
+                jot_res = await jot_bridge.checkoff(mission_id, done_n)
         elif body.type == "assess":
             provider = fieldkit_providers().get(m.provider)
             if provider is None or not provider.configured:
@@ -396,13 +418,21 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                 raise HTTPException(e.status, e.detail)
             if ev.type == "step_done":
                 store.apply_event(mission_id, "advance")
+                jot_res = await jot_bridge.checkoff(mission_id, done_n)
             say = ev.say or (m.current_step_text or "Mission complete.")
             ev_name = ev.type
         else:
             raise HTTPException(400, f"unknown mission event '{body.type}'")
         relay.audit.write("mission_event", agent=agent.name, ip=ip, via="rest", result="ok",
                           mission=mission_id, kind=ev_name, current=m.current)
-        return {"event": ev_name, "say": say, "mission": m.public()}
+        # Refresh the Obsidian engram so the vault tracks live progress.
+        try:
+            second_brain.compile_mission(
+                m, events=[{"type": ev_name, "text": say}] if ev_name in
+                ("unsafe", "off_track") else None)
+        except Exception:
+            pass
+        return {"event": ev_name, "say": say, "mission": m.public(), "jot": jot_res}
 
     @app.websocket("/v1/sessions")
     async def sessions(ws: WebSocket):
@@ -482,6 +512,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                                                   m.get("sound_relative"))
                 elif t == "text" and isinstance(m.get("text"), str):
                     sess.start_turn(m["text"][:2000], t)
+                elif t == "jot" and isinstance(m.get("text"), str):
+                    await sess.jot_down(m["text"][:500])
                 elif t == "mission":
                     sess.set_mission(str(m.get("text") or "")[:2000])
                     await ws.send_json(sess.state())

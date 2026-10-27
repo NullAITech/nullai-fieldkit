@@ -116,3 +116,33 @@ def test_readonly_agent_cannot_use_fieldkit(relay):
         r = await call(relay, "ro", "mission_status", {})
         assert r.isError and "403" in r.content[0].text
     asyncio.run(main())
+
+
+def test_mcp_jot_tools_end_to_end(relay, tmp_path, monkeypatch):
+    import shutil
+    from pathlib import Path
+
+    from zoth_relay import jot_bridge
+
+    if shutil.which("node") is None:
+        import pytest as _pt
+        _pt.skip("node required")
+    monkeypatch.setenv("FIELDKIT_JOT_DIR", str(tmp_path / "jotdata"))
+    monkeypatch.setenv("FIELDKIT_JOT_WORKER",
+                       str(Path(__file__).parent / "fake_jot_worker.cjs"))
+    jot_bridge.NOTE_BY_MISSION.clear()
+
+    async def main():
+        m = MISSIONS.create("Change mower filter", ["Pull filter", "Fit filter"],
+                            provider="wonder")
+        r = await call(relay, "pixel", "jot_mission_sync", {"mission_id": m.id})
+        assert r.structuredContent["ok"] is True and r.structuredContent["note_id"]
+        r = await call(relay, "pixel", "jot_field_note",
+                       {"text": "left bolt is stripped", "mission_id": m.id})
+        assert r.structuredContent["ok"] is True
+        r = await call(relay, "pixel", "advance_step", {"mission_id": m.id})
+        assert r.structuredContent["ok"] is True
+        assert r.structuredContent["jot"]["ok"] is True     # checkoff fired
+        r = await call(relay, "pixel", "recall_second_brain", {"query": "mower filter"})
+        assert r.structuredContent["ok"] is True
+    asyncio.run(main())

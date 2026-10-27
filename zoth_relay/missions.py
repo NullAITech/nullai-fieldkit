@@ -50,6 +50,7 @@ class Mission:
     goal: str
     provider: str
     steps: list[Step] = field(default_factory=list)
+    jot_id: str = ""                 # Hermes Jot checklist note mirroring this mission
 
     @property
     def current(self) -> int:
@@ -74,7 +75,8 @@ class Mission:
         return {"id": self.id, "goal": self.goal, "provider": self.provider,
                 "steps": [s.public(i + 1) for i, s in enumerate(self.steps)],
                 "current": self.current, "complete": self.complete,
-                "step": self.current_step_text}
+                "step": self.current_step_text,
+                "jot_note_id": self.jot_id}
 
 
 class MissionStore:
@@ -112,6 +114,17 @@ class MissionStore:
 
 
 MISSIONS = MissionStore()   # shared store: REST, sessions and MCP see one truth
+
+
+def jot_command_text(text: str) -> str | None:
+    """'Jot down: X' / 'jot this down X' -> X, else None. A voice command, parsed
+    like pause/resume keywords (control phrase, not model output)."""
+    low = (text or "").strip().lower()
+    for prefix in ("jot this down", "jot that down", "jot down"):
+        if low.startswith(prefix):
+            rest = (text or "").strip()[len(prefix):].lstrip(" :,-").strip()
+            return rest or None
+    return None
 
 
 def parse_checklist(text: str) -> list[str]:
@@ -152,11 +165,20 @@ async def _complete(provider: Provider, turn: Turn,
 
 
 async def plan_checklist(provider: Provider, goal: str,
-                         transport: httpx.AsyncBaseTransport | None = None) -> list[str]:
-    """One spoken sentence -> structured checklist (Wonder structured plan)."""
+                         transport: httpx.AsyncBaseTransport | None = None,
+                         hints: list[str] | None = None) -> list[str]:
+    """One spoken sentence -> structured checklist (Wonder structured plan).
+
+    hints: compact prior-job notes (Second Brain recall). They inform the
+    plan; they never replace the goal.
+    """
+    prior = ""
+    if hints:
+        prior = ("\nPrior field notes from similar missions (use what's relevant):\n"
+                 + "\n".join(f"- {h}" for h in hints[:3]) + "\n")
     turn = Turn(
         system=PLANNER_SYSTEM,
-        prompt=(f"Goal: {goal}\n\n"
+        prompt=(f"Goal: {goal}\n{prior}\n"
                 'Reply with ONLY JSON: {"steps": ["step 1", "step 2"]} — 4 to 8 short '
                 "imperative steps, each under 12 words, in order. No other text."))
     steps = parse_checklist(await _complete(provider, turn, transport))
