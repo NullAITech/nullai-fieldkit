@@ -11,11 +11,14 @@ android {
         applicationId = "tech.nullai.fieldkit"
         minSdk = 30
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.2.3"
+        versionCode = 7
+        versionName = "0.2.5"
         // Meta Wearables Developer Center app id. Override with -PmwdatAppId=<id>.
-        manifestPlaceholders["mwdatAppId"] =
-            (findProperty("mwdatAppId") as String?) ?: "REPLACE_WITH_WEARABLES_APP_ID"
+        // Stored as a string resource (not a manifest placeholder): aapt types
+        // a bare "0" as an integer and the DAT SDK then cannot read it.
+        val mwdatId = (findProperty("mwdatAppId") as String?)
+            ?: "REPLACE_WITH_WEARABLES_APP_ID"
+        resValue("string", "mwdat_app_id", mwdatId)
     }
 
     buildTypes {

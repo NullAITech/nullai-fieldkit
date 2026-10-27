@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Ray-Ban Meta glasses are Bluetooth-bonded: DAT discovers them via
+         the bonded-device set, which needs BLUETOOTH_CONNECT on Android 12+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -15,7 +18,7 @@
         <!-- Meta Wearables DAT: app id from Wearables Developer Center -->
         <meta-data
             android:name="com.meta.wearable.mwdat.APPLICATION_ID"
-            android:value="${mwdatAppId}" />
+            android:value="@string/mwdat_app_id" />
         <meta-data
             android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT"
             android:value="true" />

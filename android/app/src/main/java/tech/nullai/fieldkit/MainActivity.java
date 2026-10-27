@@ -2,6 +2,7 @@ package tech.nullai.fieldkit;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -34,6 +35,9 @@ import android.util.Base64;
 import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -89,8 +93,9 @@ public class MainActivity extends Activity {
     private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvSound;
     private TextureView preview;
     private ImageView ivGlasses;
-    private Button btnConnect, btnSrcPhone, btnSrcGlasses;
+    private Button btnConnect, btnSrcPhone, btnSrcGlasses, btnFab, btnFull, btnPreset;
     private boolean glassesMode = false;
+    private boolean fullscreen = false;
     private boolean scanning = false;
     private long lastQrAt = 0;
     private boolean glassesStreamingShown = false;
@@ -170,7 +175,11 @@ public class MainActivity extends Activity {
         hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
         qrReader.setHints(hints);
 
-        Button btnPreset = findViewById(R.id.btnPreset);
+        btnFab = findViewById(R.id.btnFab);
+        btnFull = findViewById(R.id.btnFull);
+        btnFull.setOnClickListener(v -> setFullscreen(true));
+        btnFab.setOnClickListener(v -> showOptionsMenu());
+        btnPreset = findViewById(R.id.btnPreset);
         btnPreset.setOnClickListener(v -> {
             presetIdx = (presetIdx + 1) % PRESETS.length;
             btnPreset.setText("Preset: " + PRESETS[presetIdx][1]);
@@ -232,24 +241,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        btnConnect.setOnClickListener(v -> {
-            savePrefs();
-            if (glassesMode) {
-                if (connected) {
-                    disconnect();
-                    DatGlasses.INSTANCE.disconnect();
-                } else if (!DatGlasses.INSTANCE.isRegistered()) {
-                    DatGlasses.INSTANCE.register(this);
-                    status("Opening Meta AI registration. Finish there, then tap Connect glasses again.");
-                } else {
-                    // Like every DAT app: ask Meta AI for device permission
-                    // (glasses camera, then microphone) before opening a session.
-                    status("Asking Meta AI for glasses camera permission… approve it there.");
-                    startActivityForResult(datPermContract.createIntent(this,
-                            com.meta.wearable.dat.core.types.Permission.CAMERA), REQ_DAT_CAM);
-                }
-            } else if (connected) disconnect(); else connect();
-        });
+        btnConnect.setOnClickListener(v -> connectToggle());
         btnMission = findViewById(R.id.btnMission);
         btnMission.setOnClickListener(v -> {
             savePrefs();
@@ -270,10 +262,13 @@ public class MainActivity extends Activity {
             @Override public void onSurfaceTextureUpdated(SurfaceTexture st) { }
         });
 
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO}, REQ_PERMS);
+        java.util.List<String> need = new java.util.ArrayList<>();
+        for (String perm : new String[]{Manifest.permission.CAMERA,
+                Manifest.permission.RECORD_AUDIO,
+                "android.permission.BLUETOOTH_CONNECT"}) {  // DAT finds glasses via bonded BT
+            if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) need.add(perm);
         }
+        if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ_PERMS);
     }
 
     @Override
@@ -451,6 +446,81 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             status("Mission failed to start.");
         }
+    }
+
+    private void connectToggle() {
+        savePrefs();
+        if (glassesMode) {
+            if (connected) {
+                disconnect();
+                DatGlasses.INSTANCE.disconnect();
+            } else if (!DatGlasses.INSTANCE.isRegistered()) {
+                DatGlasses.INSTANCE.register(this);
+                status("Opening Meta AI registration. Finish there, then tap Connect glasses again.");
+            } else {
+                // Like every DAT app: ask Meta AI for device permission
+                // (glasses camera, then microphone) before opening a session.
+                status("Asking Meta AI for glasses camera permission… approve it there.");
+                startActivityForResult(datPermContract.createIntent(this,
+                        com.meta.wearable.dat.core.types.Permission.CAMERA), REQ_DAT_CAM);
+            }
+        } else if (connected) disconnect(); else connect();
+    }
+
+    private void setFullscreen(boolean on) {
+        fullscreen = on;
+        View content = findViewById(R.id.contentCol);
+        View card = findViewById(R.id.previewCard);
+        if (on) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            ViewGroup col = (ViewGroup) content;
+            for (int i = 0; i < col.getChildCount(); i++) {
+                View ch = col.getChildAt(i);
+                if (ch.getId() != R.id.previewCard) ch.setVisibility(View.GONE);
+            }
+            ViewGroup.LayoutParams lp = card.getLayoutParams();
+            lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            card.setLayoutParams(lp);
+            btnFab.setVisibility(View.VISIBLE);
+            btnFull.setVisibility(View.GONE);
+            // Re-fit now that the view is window-sized.
+            if (preview != null) configureTransform(preview.getWidth(), preview.getHeight());
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+            ViewGroup col = (ViewGroup) content;
+            for (int i = 0; i < col.getChildCount(); i++) col.getChildAt(i).setVisibility(View.VISIBLE);
+            ViewGroup.LayoutParams lp = card.getLayoutParams();
+            lp.height = (int) (200 * getResources().getDisplayMetrics().density);
+            card.setLayoutParams(lp);
+            btnFab.setVisibility(View.GONE);
+            btnFull.setVisibility(View.VISIBLE);
+            if (preview != null) configureTransform(preview.getWidth(), preview.getHeight());
+        }
+    }
+
+    private void showOptionsMenu() {
+        String[] items = new String[]{
+                "Exit full screen",
+                "Camera source: " + (glassesMode ? "Meta glasses" : "Phone camera") + " (switch)",
+                "Model preset: " + PRESETS[presetIdx][1] + " (next)",
+                connected ? "Disconnect" : "Connect",
+                "Pause coaching (Shh)"};
+        new AlertDialog.Builder(this)
+                .setTitle("Spotter options")
+                .setItems(items, (d, which) -> {
+                    switch (which) {
+                        case 0: setFullscreen(false); break;
+                        case 1: setSource(!glassesMode); break;
+                        case 2: if (btnPreset != null) btnPreset.performClick(); break;
+                        case 3: connectToggle(); break;
+                        case 4: findViewById(R.id.btnShh).performClick(); break;
+                    }
+                }).show();
     }
 
     private void beginMission() {
@@ -674,16 +744,23 @@ public class MainActivity extends Activity {
         RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
         float centerX = viewRect.centerX();
         float centerY = viewRect.centerY();
+        // FIT (not fill): the whole frame stays visible at the camera's real
+        // aspect ratio. Letterbox bars beat a stretched/skewed picture.
         if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
             bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
             matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
-            float scale = Math.max(
+            float scale = Math.min(
                     (float) viewHeight / previewSize.getHeight(),
                     (float) viewWidth / previewSize.getWidth());
             matrix.postScale(scale, scale, centerX, centerY);
             matrix.postRotate(90 * (rotation - 2), centerX, centerY);
         } else if (rotation == Surface.ROTATION_180) {
             matrix.postRotate(180, centerX, centerY);
+        } else {
+            float scale = Math.min(
+                    (float) viewWidth / previewSize.getWidth(),
+                    (float) viewHeight / previewSize.getHeight());
+            matrix.postScale(scale, scale, centerX, centerY);
         }
         preview.setTransform(matrix);
     }
