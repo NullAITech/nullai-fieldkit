@@ -42,6 +42,7 @@ import uuid
 import httpx
 
 from .ask import AskError, decode_image
+from .missions import assess_step
 from .providers import Provider, Turn
 from .trio import Advisor, Director, Eyes, Preset, custom_preset, get_preset
 
@@ -118,6 +119,8 @@ class Session:
         self._proactive_task: asyncio.Task | None = None
         self.allow_outside = False          # wearer voice-focus: ignore bystanders
         self.ignored_outside = 0
+        self._last_assess_text = ""         # auto step-tracking dedupe/throttle
+        self._last_assess_at = 0.0
         self.heading: int | None = None     # last compass heading (degrees)
         self.heading_source = ""            # "phone" | "glasses"
         self.sound_heading: int | None = None   # estimated world bearing of sound
@@ -216,6 +219,40 @@ class Session:
                 pass  # a bad tick must never kill the session loop
             await asyncio.sleep(interval)
 
+    async def _maybe_advance_mission(self, observation: str) -> bool:
+        """Auto step-tracking: the coach knows when a step is done — no Next button.
+
+        Typed assessor (missions.assess_step) judges the Eyes observation
+        against the current step. step_done advances the shared mission and
+        speaks the next step; unsafe speaks at once. Returns True when this
+        tick already spoke authoritatively (Director sits this one out).
+        """
+        m = self._mission()
+        if m is None or not m.current_step_text:
+            return False
+        now = time.monotonic()
+        if observation == self._last_assess_text or now - self._last_assess_at < 4.0:
+            return False
+        self._last_assess_text, self._last_assess_at = observation, now
+        try:
+            ev = await assess_step(self.provider, m, observation, self.transport)
+        except Exception:
+            return False
+        if ev.type == "step_done":
+            self._mission_store.apply_event(m.id, "advance")
+            nxt = m.current_step_text
+            text = ev.say or (f"Next: {nxt}" if nxt else "Mission complete.")
+            self.ctx.add("assistant", text)
+            await self.send({"type": "say", "text": text, "reason": "step-done"})
+            await self.send(self.state())
+            return True
+        if ev.type == "unsafe":
+            text = ev.say or "Stop — that looks unsafe."
+            self.ctx.add("assistant", text)
+            await self.send({"type": "say", "text": text, "reason": "unsafe"})
+            return True
+        return False
+
     async def proactive_tick(self) -> None:
         """One Eyes->Advisor->Director pass over the latest changed frame."""
         if not self.guide_on or self.closed or self.paused:
@@ -227,6 +264,8 @@ class Session:
         if obs is None:
             return
         await self.send({"type": "observation", "text": obs.text})
+        if await self._maybe_advance_mission(obs.text):
+            return
         suggestions = await self._advisor.advise(obs, self._mission_text())
         dec = await self._director.decide(obs, suggestions, "", self._mission_text(), self.preset)
         self.metrics.append({"kind": "proactive", "speak": dec.speak, "reason": dec.reason})

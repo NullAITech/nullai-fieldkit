@@ -22,7 +22,7 @@ def H(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-def make_provider():
+def make_provider(assess_event=None):
     calls = {"n": 0}
 
     def handler(req: httpx.Request):
@@ -30,7 +30,10 @@ def make_provider():
         body = json.loads(req.content)
         content = body["messages"][-1]["content"]
         prompt = content[0]["text"] if isinstance(content, list) else content
-        if "set of eyes" in prompt:
+        if "Observation (what the camera/user reports)" in prompt:
+            text = json.dumps({"event": assess_event or "none",
+                               "say": "Done. Next one." if assess_event else ""})
+        elif "set of eyes" in prompt:
             text = "A red mower, filter cover off."
         elif "Propose up to 3" in prompt:
             text = json.dumps({"suggestions": [
@@ -44,8 +47,8 @@ def make_provider():
     return p, httpx.MockTransport(handler), calls
 
 
-def guided_session(sent, preset="get-it-done"):
-    p, t, calls = make_provider()
+def guided_session(sent, preset="get-it-done", assess_event=None):
+    p, t, calls = make_provider(assess_event)
 
     async def send(obj):
         sent.append(obj)
@@ -156,3 +159,39 @@ def test_ws_guide_preset_compass_and_voice_gate(env):
         ws.send_json({"type": "pause"})
         st = ws.receive_json()
         assert st["paused"] is True
+
+
+async def test_auto_step_advance_without_next_button():
+    """The coach knows: a step_done observation advances the mission and speaks
+    the next step with no manual advance; the same observation never re-fires."""
+    from zoth_relay.missions import MissionStore
+    sent = []
+    s, _ = guided_session(sent, assess_event="step_done")
+    store = MissionStore()
+    m = store.create("Fix the mower", ["Pull the filter", "Fit the new filter"],
+                     provider="spark")
+    s.attach_mission(store, m.id)
+    s.on_frame(PNG)
+    await s.proactive_tick()
+    assert store.get(m.id).current == 2                      # auto-advanced
+    say = [e for e in sent if e["type"] == "say"]
+    assert say and say[-1]["reason"] == "step-done"
+    n_says = len(say)
+    s.on_frame(PNG + "x")                                    # new frame, same eyes text
+    await s.proactive_tick()
+    assert store.get(m.id).current == 2                      # deduped, no double advance
+    assert len([e for e in sent if e["type"] == "say"]) >= n_says
+
+
+async def test_auto_step_unsafe_speaks_immediately():
+    from zoth_relay.missions import MissionStore
+    sent = []
+    s, _ = guided_session(sent, assess_event="unsafe")
+    store = MissionStore()
+    m = store.create("Fix the mower", ["Pull the filter"], provider="spark")
+    s.attach_mission(store, m.id)
+    s.on_frame(PNG)
+    await s.proactive_tick()
+    say = [e for e in sent if e["type"] == "say"]
+    assert say and say[-1]["reason"] == "unsafe"
+    assert store.get(m.id).current == 1                      # never advances on unsafe

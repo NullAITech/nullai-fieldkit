@@ -77,6 +77,13 @@ public class MainActivity extends Activity {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final int REQ_PERMS = 7;
     private static final int REQ_SPEECH = 9;
+    private static final int REQ_DAT_CAM = 4101;   // Meta AI glasses camera permission
+    private static final int REQ_DAT_MIC = 4102;   // Meta AI glasses microphone permission
+    private final com.meta.wearable.dat.core.Wearables.RequestPermissionContract datPermContract =
+            new com.meta.wearable.dat.core.Wearables.RequestPermissionContract();
+    private Button btnMission;
+    private String pendingMissionId = "", pendingFirst = "";
+    private int pendingTotal = 0;
 
     private EditText etRelay, etToken, etGoal;
     private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvSound;
@@ -235,14 +242,18 @@ public class MainActivity extends Activity {
                     DatGlasses.INSTANCE.register(this);
                     status("Opening Meta AI registration. Finish there, then tap Connect glasses again.");
                 } else {
-                    DatGlasses.INSTANCE.connect();
-                    connect();
+                    // Like every DAT app: ask Meta AI for device permission
+                    // (glasses camera, then microphone) before opening a session.
+                    status("Asking Meta AI for glasses camera permission… approve it there.");
+                    startActivityForResult(datPermContract.createIntent(this,
+                            com.meta.wearable.dat.core.types.Permission.CAMERA), REQ_DAT_CAM);
                 }
             } else if (connected) disconnect(); else connect();
         });
-        findViewById(R.id.btnMission).setOnClickListener(v -> {
+        btnMission = findViewById(R.id.btnMission);
+        btnMission.setOnClickListener(v -> {
             savePrefs();
-            startMission();
+            if (!pendingMissionId.isEmpty()) beginMission(); else startMission();
         });
         findViewById(R.id.btnNext).setOnClickListener(v -> nextStep());
         findViewById(R.id.btnTalk).setOnClickListener(v -> talk());
@@ -410,16 +421,28 @@ public class MainActivity extends Activity {
                     }
                     try {
                         JSONObject m = new JSONObject(text);
-                        missionId = m.optString("id");
+                        // Nothing starts on a default plan: Wonder proposes
+                        // steps for THIS goal, the wearer reviews them and
+                        // decides to begin (Begin button) or re-plans.
+                        pendingMissionId = m.optString("id");
                         JSONArray steps = m.optJSONArray("steps");
-                        String first = steps != null && steps.length() > 0
+                        pendingFirst = steps != null && steps.length() > 0
                                 ? steps.getJSONObject(0).optString("text") : "";
-                        runOnUiThread(() -> tvStep.setText("Step 1/" + (steps == null ? 0 : steps.length()) + ": " + first));
-                        speak("Mission ready. Step one: " + first);
-                        status("Mission started. Reconnecting session to attach it…");
-                        // Re-hello with mission_id so coaching turns carry the step.
-                        if (connected) { disconnect(); }
-                        connect();
+                        pendingTotal = steps == null ? 0 : steps.length();
+                        StringBuilder review = new StringBuilder("Your plan — review, then Begin:\n");
+                        if (steps != null) {
+                            for (int i = 0; i < steps.length(); i++) {
+                                review.append(i + 1).append(". ")
+                                        .append(steps.getJSONObject(i).optString("text")).append("\n");
+                            }
+                        }
+                        final String reviewText = review.toString().trim();
+                        runOnUiThread(() -> {
+                            tvStep.setText(reviewText);
+                            btnMission.setText("Begin");
+                        });
+                        speak("Plan ready. Review the steps, then tap Begin when you're ready.");
+                        status("Planned with Wonder. Edit the goal + Start to re-plan, or Begin.");
                     } catch (Exception e) {
                         status("Mission reply unreadable.");
                     }
@@ -428,6 +451,20 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             status("Mission failed to start.");
         }
+    }
+
+    private void beginMission() {
+        // The wearer decided: attach the reviewed plan and start coaching.
+        // Steps now advance on their own from what the camera sees; the
+        // Next button remains only as a manual override.
+        missionId = pendingMissionId;
+        pendingMissionId = "";
+        btnMission.setText("Start");
+        tvStep.setText("Step 1/" + pendingTotal + ": " + pendingFirst);
+        speak("Mission ready. Step one: " + pendingFirst);
+        status("Mission started. Reconnecting session to attach it…");
+        if (connected) { disconnect(); }
+        connect();
     }
 
     private void nextStep() {
@@ -480,9 +517,42 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean datGranted(com.meta.wearable.dat.core.types.DatResult<
+            com.meta.wearable.dat.core.types.PermissionStatus,
+            com.meta.wearable.dat.core.types.PermissionError> r) {
+        return r != null && r.isSuccess()
+                && r.getOrNull() == com.meta.wearable.dat.core.types.PermissionStatus.Granted.INSTANCE;
+    }
+
     @Override
     protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
+        if (code == REQ_DAT_CAM || code == REQ_DAT_MIC) {
+            com.meta.wearable.dat.core.types.DatResult<
+                    com.meta.wearable.dat.core.types.PermissionStatus,
+                    com.meta.wearable.dat.core.types.PermissionError> r =
+                    datPermContract.parseResult(result, data);
+            boolean granted = datGranted(r);
+            if (code == REQ_DAT_CAM) {
+                if (!granted) {
+                    status("Glasses camera not allowed in Meta AI — Spotter cannot see. "
+                            + (r != null && r.errorOrNull() != null ? r.errorOrNull() : ""));
+                    return;
+                }
+                status("Glasses camera allowed. Now asking for the glasses microphone…");
+                startActivityForResult(datPermContract.createIntent(this,
+                        com.meta.wearable.dat.core.types.Permission.MICROPHONE), REQ_DAT_MIC);
+            } else {
+                if (!granted) {
+                    status("Glasses microphone not allowed in Meta AI (camera still works).");
+                } else {
+                    status("Glasses camera + microphone allowed. Opening session…");
+                }
+                DatGlasses.INSTANCE.connect();
+                connect();
+            }
+            return;
+        }
         if (code == REQ_SPEECH && result == RESULT_OK && data != null) {
             ArrayList<String> heard = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (heard != null && !heard.isEmpty()) {
