@@ -35,6 +35,15 @@ Production path (later): register the app in the
 real id: `./gradlew assembleDebug -PmwdatAppId=<YOUR_ID>`. Without either
 `0`+Developer Mode or a real id, DAT refuses with "no eligible device".
 
+Placeholder guard: the manifest default is the literal
+`REPLACE_WITH_WEARABLES_APP_ID` and is stored as a string resource
+(`mwdat_app_id`) so values like `0` stay readable to the SDK (aapt types a
+bare `0` as an integer, which `MetaWearablesConfig` rejects). If you see
+`Failed to read metadata ... APPLICATION_ID` in logcat, you are running a
+build that still carries the placeholder — rebuild with `-PmwdatAppId`.
+Runtime check: Spotter prints the SDK's own view (`reg/devMode/devices=…`)
+in its status line before every session attempt.
+
 ## Honest status
 
 Compiles against the real DAT 1.0.1 SDK and the phone UI flow is in place.

@@ -94,6 +94,8 @@
       <input id="goal" placeholder="One sentence: what are we doing?">
       <button id="btnPlan">Plan</button>
     </div>
+    <input id="memories" placeholder="Attach memories (optional): left bolt stripped; filter housing cracks" style="margin-top:8px;width:100%">
+    <div id="qa" style="margin-top:8px"></div>
     <div id="prior" style="font-size:13px;color:var(--mut);margin-top:6px"></div>
     <div id="badges" style="margin-top:8px"></div>
     <ol class="steps" id="steps"></ol>
@@ -226,19 +228,37 @@ async function fetchMission() {
   if (r.ok) renderSteps(await r.json());
 }
 $("btnConnect").onclick = () => connect(missionId || undefined);
-$("btnPlan").onclick = async () => {
+async function plan(answers) {
   const goal = $("goal").value.trim(); if (!goal) return;
+  const memRaw = $("memories").value.trim();
   status("Planning with Muse Wonder…");
-  const r = await fetch(relayBase() + "/v1/missions", { method: "POST", headers: H(), body: JSON.stringify({ goal, provider: "wonder" }) });
+  const body = { goal, provider: "wonder" };
+  if (answers) body.answers = answers;
+  if (memRaw) body.memories = [memRaw];
+  const r = await fetch(relayBase() + "/v1/missions", { method: "POST", headers: H(), body: JSON.stringify(body) });
   if (!r.ok) { status("Plan failed (" + r.status + "). Check relay/token."); return; }
   const m = await r.json();
+  if (m.status === "clarify") {
+    $("qa").innerHTML = "<div class='label'>BEFORE I PLAN — QUICK QUESTIONS</div>";
+    m.questions.forEach((q, i) => {
+      $("qa").innerHTML += `<input data-a="${i}" placeholder="${q.replace(/"/g, "&quot;")}" style="margin-top:6px;width:100%">`;
+    });
+    const b = document.createElement("button"); b.className = "primary"; b.textContent = "Answer & plan";
+    b.onclick = () => plan([...document.querySelectorAll("#qa input")].map(el => el.value));
+    $("qa").appendChild(b);
+    speak("Two quick questions before I plan — answer them and I'll build your checklist.");
+    status("Wonder needs answers first. Nothing starts until you say Begin.");
+    return;
+  }
+  $("qa").innerHTML = "";
   pendingId = m.id; renderSteps(m);
   $("prior").textContent = (m.prior_notes || []).length
     ? "From last time: " + m.prior_notes.map(h => h.note).join(" · ") : "";
   $("btnBegin").disabled = false;
   speak("Plan ready. Review the steps, then tap Begin when you're ready.");
   status("Planned with Wonder. Nothing starts until you say Begin.");
-};
+}
+$("btnPlan").onclick = () => plan(null);
 $("btnBegin").onclick = () => {
   missionId = pendingId; pendingId = "";
   $("btnBegin").disabled = true; $("btnNext").disabled = false;

@@ -96,6 +96,8 @@ public class MainActivity extends Activity {
     private Button btnConnect, btnSrcPhone, btnSrcGlasses, btnFab, btnFull, btnPreset;
     private boolean glassesMode = false;
     private boolean fullscreen = false;
+    private byte[] pendingGlassesFrame = null;
+    private boolean frameHoldNoted = false;
     private boolean scanning = false;
     private long lastQrAt = 0;
     private boolean glassesStreamingShown = false;
@@ -236,7 +238,17 @@ public class MainActivity extends Activity {
                     JSONObject msg = new JSONObject();
                     msg.put("type", "frame");
                     msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
-                    sendWs(msg);
+                    if (connected) {
+                        sendWs(msg);
+                    } else {
+                        // Glasses frames decode fine locally but the relay never
+                        // saw them — hold the newest and flush on connect.
+                        pendingGlassesFrame = jpeg;
+                        if (!frameHoldNoted) {
+                            frameHoldNoted = true;
+                            status("Glasses frame held on this phone — tap Connect to send it to the relay.");
+                        }
+                    }
                 } catch (Exception ignored) { }
             }
         });
@@ -323,6 +335,14 @@ public class MainActivity extends Activity {
                     hello.put("preset", PRESETS[presetIdx][0]);
                     if (!missionId.isEmpty()) hello.put("mission_id", missionId);
                     webSocket.send(hello.toString());
+                    if (pendingGlassesFrame != null) {
+                        JSONObject held = new JSONObject();
+                        held.put("type", "frame");
+                        held.put("image", Base64.encodeToString(pendingGlassesFrame, Base64.NO_WRAP));
+                        webSocket.send(held.toString());
+                        pendingGlassesFrame = null;
+                        frameHoldNoted = false;
+                    }
                 } catch (Exception ignored) { }
                 status("Connected. Say a goal, then tap Start mission.");
             }

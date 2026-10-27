@@ -168,6 +168,75 @@ async def _complete(provider: Provider, turn: Turn,
     return "".join(full)
 
 
+@dataclass
+class PlanResult:
+    status: str                            # ready | clarify
+    steps: list[str] = field(default_factory=list)
+    questions: list[str] = field(default_factory=list)
+
+
+def _context_block(hints: list[str] | None, memories: list[str] | None,
+                   vision_note: str | None) -> str:
+    block = ""
+    if hints:
+        block += ("\nPrior field notes from similar missions (use what's relevant):\n"
+                  + "\n".join(f"- {h}" for h in hints[:3]) + "\n")
+    if memories:
+        block += ("\nAttached memories the wearer picked (honor them):\n"
+                  + "\n".join(f"- {m}" for m in memories[:5]) + "\n")
+    if vision_note:
+        block += f"\nWhat the camera sees right now: {vision_note[:400]}\n"
+    return block
+
+
+async def plan_interview(provider: Provider, goal: str,
+                         transport: httpx.AsyncBaseTransport | None = None,
+                         *, hints: list[str] | None = None,
+                         answers: list[str] | None = None,
+                         vision_note: str | None = None,
+                         memories: list[str] | None = None) -> PlanResult:
+    """Interview-then-plan: ambiguous goals get questions first, then steps.
+
+    Without answers the planner may return {"questions": [...]} (2-3 short
+    clarifying questions) when the goal is ambiguous, or {"steps": [...]}
+    when it is clear. With answers it must return steps. This replaces the
+    old rigid steps-only straitjacket while keeping structured output.
+    """
+    ctx = _context_block(hints, memories, vision_note)
+    if answers:
+        answered = ("\nThe wearer answered your questions:\n"
+                    + "\n".join(f"{i}. {a}" for i, a in enumerate(answers[:5], 1)) + "\n")
+        prompt = (f"Goal: {goal}\n{ctx}{answered}\n"
+                  'Reply with ONLY JSON: {"steps": ["step 1", ...]} — 4 to 8 short '
+                  "imperative steps, each under 12 words, in order. No other text.")
+    else:
+        prompt = (f"Goal: {goal}\n{ctx}\n"
+                  "If this goal is ambiguous, reply with ONLY JSON: "
+                  '{"questions": ["q1", "q2", "q3"]} — 2 or 3 short clarifying '
+                  "questions, no other text.\n"
+                  "If it is clear, reply with ONLY JSON: "
+                  '{"steps": ["step 1", ...]} — 4 to 8 short imperative steps, '
+                  "each under 12 words, in order. No other text.")
+    turn = Turn(system=PLANNER_SYSTEM, prompt=prompt)
+    text = await _complete(provider, turn, transport)
+    lo, hi = text.find("{"), text.rfind("}")
+    if 0 <= lo < hi:
+        try:
+            obj = json.loads(text[lo:hi + 1])
+            if isinstance(obj, dict):
+                qs = obj.get("questions")
+                if isinstance(qs, list) and qs and not answers:
+                    qs = [str(q).strip() for q in qs if str(q).strip()][:4]
+                    if qs:
+                        return PlanResult(status="clarify", questions=qs)
+                steps = parse_checklist(text)
+                if steps:
+                    return PlanResult(status="ready", steps=steps)
+        except json.JSONDecodeError:
+            pass
+    raise MissionError(502, f"planner {provider.name} returned no usable plan")
+
+
 async def plan_checklist(provider: Provider, goal: str,
                          transport: httpx.AsyncBaseTransport | None = None,
                          hints: list[str] | None = None) -> list[str]:
@@ -176,19 +245,10 @@ async def plan_checklist(provider: Provider, goal: str,
     hints: compact prior-job notes (Second Brain recall). They inform the
     plan; they never replace the goal.
     """
-    prior = ""
-    if hints:
-        prior = ("\nPrior field notes from similar missions (use what's relevant):\n"
-                 + "\n".join(f"- {h}" for h in hints[:3]) + "\n")
-    turn = Turn(
-        system=PLANNER_SYSTEM,
-        prompt=(f"Goal: {goal}\n{prior}\n"
-                'Reply with ONLY JSON: {"steps": ["step 1", "step 2"]} — 4 to 8 short '
-                "imperative steps, each under 12 words, in order. No other text."))
-    steps = parse_checklist(await _complete(provider, turn, transport))
-    if not steps:
-        raise MissionError(502, f"planner {provider.name} returned no usable steps")
-    return steps
+    res = await plan_interview(provider, goal, transport, hints=hints)
+    if res.status == "ready":
+        return res.steps
+    raise MissionError(502, f"planner {provider.name} asked questions instead of planning")
 
 
 @dataclass
@@ -199,9 +259,15 @@ class StepEvent:
 
 async def assess_step(provider: Provider, mission: Mission, observation: str,
                       transport: httpx.AsyncBaseTransport | None = None) -> StepEvent:
-    """Maps an observation to a typed step event (no prose scraping downstream)."""
+    """Maps an observation to a typed step event (no prose scraping downstream).
+
+    Carries full step history so judgments stay in context across the mission
+    instead of checking each step amnesiacally.
+    """
+    history = "\n".join(f"- {s.text} ({s.status})" for s in mission.steps)
     turn = Turn(prompt=(
         f"Mission: {mission.goal}\n"
+        f"Progress so far:\n{history}\n"
         f"Current step {mission.current}/{len(mission.steps)}: {mission.current_step_text}\n"
         f"Observation (what the camera/user reports): {observation}\n"
         'Reply with ONLY JSON: {"event":"step_done|off_track|unsafe|none",'

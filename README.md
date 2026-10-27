@@ -92,7 +92,20 @@ FieldKit is designed around a simple rule: **watching is not the same as acting.
 
 ## Status
 
-Hackathon build, developer preview. Working today: the server backbone (providers, live sessions, missions, typed step tracking, the Eyes/Advisor/Director guide trio with presets, automatic step advance, MCP agent tools, Hermes Jot sync and Obsidian Second Brain engrams, tests, and live soak checks) and the Spotter Android app (phone camera, QR pairing, plan-review-then-Begin missions, voice in/out, compass and sound-direction estimates, Meta glasses via the Wearables DAT video stream with Meta AI permission flow). Still being connected: live mode to X and the phone-only web trial.
+Hackathon build, developer preview. Day plan and honest blockers live in
+[ROADMAP-FOR-MUSE.md](ROADMAP-FOR-MUSE.md) — that file is the executable plan
+through the Nov 4 submission.
+
+Working today: the server backbone (providers, live sessions, missions with
+interview-then-plan, typed step tracking with step history, the
+Eyes/Advisor/Director guide trio, automatic step advance, vision-conditioned
+planning, MCP agent tools, Hermes Jot sync and Obsidian Second Brain engrams,
+tests, and live soak checks), the judge PWA at `/pwa` (camera or synthetic
+test scenes, questions-before-plan, live Jot/Obsidian badges), and the Spotter
+Android app (phone camera, QR pairing, plan-review-then-Begin missions, voice
+in/out, compass and sound-direction estimates, Meta glasses via the Wearables
+DAT video stream with Meta AI permission flow and held-frame flush). Still
+being connected: live stream to X and the final demo film.
 
 Repository history in this public repo is curated on purpose: the first commit is a frozen snapshot of what existed before the hackathon; later commits show only the new FieldKit work in order. Internal provenance is preserved separately by NullAI.
 

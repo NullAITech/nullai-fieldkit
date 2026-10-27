@@ -14,9 +14,9 @@ import uuid
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
 from . import jot_bridge, recap, second_brain
-from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_checklist
+from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_interview
 from .providers import provider_presets
-from .sessions import ACTIVE_SESSIONS, Session
+from .sessions import ACTIVE_SESSIONS, FRAMES, Session
 from .trio import Advisor, Director, Eyes
 from .live import LiveError, mint_token
 from .guide import Guide
@@ -66,6 +66,10 @@ class LiveTokenRequest(BaseModel):
 class MissionCreate(BaseModel):
     goal: str = Field(..., min_length=1, max_length=2000)
     provider: str | None = Field(None, max_length=64, description="planner provider; default wonder")
+    answers: list[str] | None = Field(
+        None, description="answers to a clarify round; resubmit goal with these to plan")
+    memories: list[str] | None = Field(
+        None, max_length=2000, description="wearer-attached memory notes the plan must honor")
 
 
 class MissionEventIn(BaseModel):
@@ -358,14 +362,39 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             hints = second_brain.prior_hints(body.goal.strip())
         except Exception:
             hints = []
+        # Vision-aware planning: if this agent has a live frame, describe it
+        # once so Wonder plans from what is actually there, not blind.
+        vision_note = None
         try:
-            steps = await plan_checklist(provider, body.goal.strip(),
-                                         getattr(app.state, "session_transport", None),
-                                         hints=[h["note"] for h in hints])
+            latest = FRAMES.latest(agent.name)
+            if latest is not None:
+                from .trio import Eyes
+                eye_provider = fieldkit_providers().get("spark") or provider
+                if eye_provider.configured:
+                    obs = await Eyes(eye_provider,
+                                     getattr(app.state, "session_transport", None)
+                                     ).observe((latest[0], latest[1]), "")
+                    vision_note = obs.text if obs else None
+        except Exception:
+            vision_note = None
+        try:
+            plan = await plan_interview(
+                provider, body.goal.strip(),
+                getattr(app.state, "session_transport", None),
+                hints=[h["note"] for h in hints],
+                answers=(body.answers or None),
+                vision_note=vision_note,
+                memories=body.memories)
         except MissionError as e:
             relay.audit.write("mission_create", agent=agent.name, ip=ip, via="rest",
                               result="error", status=e.status, provider=name)
             raise HTTPException(e.status, e.detail)
+        if plan.status == "clarify":
+            relay.audit.write("mission_clarify", agent=agent.name, ip=ip, via="rest",
+                              result="clarify", questions=len(plan.questions))
+            return {"status": "clarify", "questions": plan.questions,
+                    "prior_notes": hints}
+        steps = plan.steps
         m = missions_store().create(body.goal.strip(), steps, provider=name)
         # ids + counts only: goals and steps are never written to the audit log
         relay.audit.write("mission_create", agent=agent.name, ip=ip, via="rest", result="ok",
@@ -378,6 +407,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         except Exception:
             pass
         out = m.public()
+        out["status"] = "ready"
         out["jot"] = jot_res
         out["prior_notes"] = hints
         return JSONResponse(out, status_code=201)
