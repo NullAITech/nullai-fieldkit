@@ -16,6 +16,7 @@ from .ask import AskError, ask_events, build_messages, decode_image
 from .missions import MissionError, MissionStore, assess_step, plan_checklist
 from .providers import provider_presets
 from .sessions import Session
+from .trio import Advisor, Director, Eyes
 from .live import LiveError, mint_token
 from .guide import Guide
 from .guide_stream import Conn, StreamHub
@@ -446,10 +447,19 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                 await ws.close(code=1000)
                 return
             sess.attach_mission(missions_store(), mid)
+        if hello.get("guide") or "preset" in hello or "preset_custom" in hello:
+            transport = getattr(app.state, "session_transport", None)
+            custom = hello.get("preset_custom") if isinstance(hello.get("preset_custom"), dict) else None
+            sess.set_guide(Eyes(provider, transport), Advisor(provider, transport),
+                           Director(providers.get("wonder") or provider, transport),
+                           str(hello.get("preset") or "") or None, custom,
+                           bool(hello.get("allow_outside", False)))
+            sess.start_proactive()
         # counts/ids only: frames, speech and replies are never logged
         relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="open", provider=name)
         ready = {"type": "ready", "provider": name, **provider.public(),
-                 "history_budget": sess.ctx.budget}
+                 "history_budget": sess.ctx.budget,
+                 "guide": sess.guide_on, "preset": sess.preset.name}
         ms = sess.mission_state()
         if ms is not None:
             ready["mission"] = ms
@@ -464,12 +474,27 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                     sess.on_frame(m["image"])
                 elif t == "clip" and isinstance(m.get("video_url"), str):
                     sess.on_clip(m["video_url"])
-                elif t in ("speech", "text") and isinstance(m.get("text"), str):
-                    if t == "text" or m.get("final", True):
-                        sess.start_turn(m["text"][:2000], t)
+                elif t == "speech" and isinstance(m.get("text"), str):
+                    if m.get("final", True):
+                        await sess.on_user_speech(m["text"][:2000],
+                                                  str(m.get("speaker") or "wearer"))
+                elif t == "text" and isinstance(m.get("text"), str):
+                    sess.start_turn(m["text"][:2000], t)
                 elif t == "mission":
                     sess.set_mission(str(m.get("text") or "")[:2000])
                     await ws.send_json(sess.state())
+                elif t == "preset":
+                    sess.set_preset(str(m.get("name") or "") or None,
+                                    m.get("custom") if isinstance(m.get("custom"), dict) else None)
+                    await ws.send_json(sess.state())
+                elif t == "pause":
+                    sess.set_paused(True)
+                    await ws.send_json(sess.state())
+                elif t == "resume":
+                    sess.set_paused(False)
+                    await ws.send_json(sess.state())
+                elif t == "compass":
+                    sess.on_compass(m.get("heading"), str(m.get("source") or "phone"))
                 elif t == "barge":
                     await sess.barge()
                 elif t == "bye":

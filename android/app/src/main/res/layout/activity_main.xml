@@ -220,6 +220,15 @@
                 android:layout_marginStart="8dp" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/btnPreset"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Preset: Get It Done"
+            android:textColor="#111111"
+            android:background="@drawable/bg_btn_light"
+            android:layout_marginTop="10dp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -234,6 +243,16 @@
                 android:text="Talk"
                 android:textColor="#111111"
                 android:background="@drawable/bg_btn_light" />
+
+            <Button
+                android:id="@+id/btnShh"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Shh"
+                android:textColor="#111111"
+                android:background="@drawable/bg_btn_light"
+                android:layout_marginStart="8dp" />
 
             <Button
                 android:id="@+id/btnNext"

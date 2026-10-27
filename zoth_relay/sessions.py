@@ -43,6 +43,7 @@ import httpx
 
 from .ask import AskError, decode_image
 from .providers import Provider, Turn
+from .trio import Advisor, Director, Eyes, Preset, custom_preset, get_preset
 
 DEFAULT_HISTORY_BUDGET = 24000      # chars of transcript replayed per turn
 MIN_HISTORY_BUDGET = 500
@@ -90,6 +91,16 @@ class Session:
         self.metrics: list[dict] = []
         self._task: asyncio.Task | None = None
         self.closed = False
+        # Guide trio (D4): preset desires + proactive Eyes/Advisor/Director.
+        self.preset: Preset = get_preset(None)
+        self._eyes: Eyes | None = None
+        self._advisor: Advisor | None = None
+        self._director: Director | None = None
+        self._proactive_task: asyncio.Task | None = None
+        self.allow_outside = False          # wearer voice-focus: ignore bystanders
+        self.ignored_outside = 0
+        self.heading: int | None = None     # last compass heading (degrees)
+        self.heading_source = ""            # "phone" | "glasses"
 
     # ------------------------------------------------------------ lifecycle
     def set_hello(self, mission: str, system: str, history_budget=None) -> None:
@@ -123,8 +134,99 @@ class Session:
             return f"{m.goal} | Mission complete"
         return f"{m.goal} | Current step {m.current}/{len(m.steps)}: {m.current_step_text}"
 
+    # ------------------------------------------------------------ guide trio (D4)
+    def set_guide(self, eyes: Eyes, advisor: Advisor, director: Director,
+                  preset_name: str | None = None, custom: dict | None = None,
+                  allow_outside: bool = False) -> None:
+        self._eyes, self._advisor, self._director = eyes, advisor, director
+        self.allow_outside = bool(allow_outside)
+        self.set_preset(preset_name, custom)
+
+    def set_preset(self, name: str | None, custom: dict | None = None) -> None:
+        self.preset = custom_preset(name or "get-it-done", **(custom or {})) if custom else get_preset(name)
+        if self._director is not None:
+            pass  # preset is read per-decision; nothing else to rewire
+
+    @property
+    def guide_on(self) -> bool:
+        return self._director is not None
+
+    def set_paused(self, paused: bool) -> None:
+        if self._director is not None:
+            self._director.paused = paused
+
+    @property
+    def paused(self) -> bool:
+        return bool(self._director and self._director.paused)
+
+    def on_compass(self, heading, source: str = "phone") -> None:
+        try:
+            self.heading = int(heading) % 360
+        except (TypeError, ValueError):
+            return
+        self.heading_source = source if source in ("phone", "glasses") else "phone"
+
+    def start_proactive(self, interval: float = 2.5) -> None:
+        if self._proactive_task is None and self.guide_on:
+            self._proactive_task = asyncio.create_task(self._proactive_loop(interval))
+
+    async def _proactive_loop(self, interval: float) -> None:
+        while not self.closed:
+            try:
+                await self.proactive_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass  # a bad tick must never kill the session loop
+            await asyncio.sleep(interval)
+
+    async def proactive_tick(self) -> None:
+        """One Eyes->Advisor->Director pass over the latest changed frame."""
+        if not self.guide_on or self.closed or self.paused:
+            return
+        image, self._pending_frame = self._pending_frame, None
+        if image is None:
+            return
+        obs = await self._eyes.observe(image, self._mission_text())
+        if obs is None:
+            return
+        await self.send({"type": "observation", "text": obs.text})
+        suggestions = await self._advisor.advise(obs, self._mission_text())
+        dec = await self._director.decide(obs, suggestions, "", self._mission_text(), self.preset)
+        self.metrics.append({"kind": "proactive", "speak": dec.speak, "reason": dec.reason})
+        self.metrics = self.metrics[-200:]
+        if dec.speak:
+            self.ctx.add("assistant", dec.text)
+            await self.send({"type": "say", "text": dec.text, "reason": dec.reason})
+
+    async def on_user_speech(self, text: str, speaker: str = "wearer") -> None:
+        """Wearer voice-focus gate, then a normal (Director-aware) turn."""
+        text = (text or "").strip()
+        if not text:
+            return
+        low = text.lower()
+        if low in ("pause", "shh", "be quiet", "stop coaching"):
+            self.set_paused(True)
+            await self.send({"type": "stop", "gen": self.gen})
+            await self.send(self.state())
+            return
+        if low in ("resume", "unpause", "keep coaching") and self.paused:
+            self.set_paused(False)
+            await self.send(self.state())
+            return
+        if speaker == "other" and not self.allow_outside:
+            # Bystander conversation: heard, counted, never answered.
+            self.ignored_outside += 1
+            await self.send(self.state())
+            return
+        if self.paused and speaker == "wearer":
+            self.set_paused(False)  # wearer talking again resumes coaching
+        self.start_turn(text, "speech")
+
     async def close(self) -> None:
         self.closed = True
+        if self._proactive_task and not self._proactive_task.done():
+            self._proactive_task.cancel()
         if self._task and not self._task.done():
             self._task.cancel()
 
@@ -160,7 +262,10 @@ class Session:
         out = {"type": "state", "provider": self.provider.name, "turns": self.turns,
                "frames_received": self.frames_received, "frames_changed": self.frames_changed,
                "frames_sent": self.frames_sent, "history_chars": self.ctx.chars,
-               "history_budget": self.ctx.budget}
+               "history_budget": self.ctx.budget,
+               "guide": self.guide_on, "preset": self.preset.name, "paused": self.paused,
+               "ignored_outside": self.ignored_outside,
+               "heading": self.heading, "heading_source": self.heading_source or None}
         ms = self.mission_state()
         if ms is not None:
             out["mission"] = ms

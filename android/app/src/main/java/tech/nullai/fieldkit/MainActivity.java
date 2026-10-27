@@ -86,6 +86,11 @@ public class MainActivity extends Activity {
     private SensorManager sensors;
     private final float[] grav = new float[3], mag = new float[3];
     private boolean hasGrav, hasMag;
+    private static final String[][] PRESETS = {
+            {"get-it-done", "Get It Done"}, {"safety-first", "Safety First"},
+            {"teach-me", "Teach Me"}, {"social", "Social"}};
+    private int presetIdx = 0;
+    private long lastCompassSentAt = 0;
 
     private final OkHttpClient http = new OkHttpClient.Builder()
             .pingInterval(20, TimeUnit.SECONDS).build();
@@ -133,6 +138,25 @@ public class MainActivity extends Activity {
         hints.put(DecodeHintType.POSSIBLE_FORMATS, Arrays.asList(BarcodeFormat.QR_CODE));
         hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
         qrReader.setHints(hints);
+
+        Button btnPreset = findViewById(R.id.btnPreset);
+        btnPreset.setOnClickListener(v -> {
+            presetIdx = (presetIdx + 1) % PRESETS.length;
+            btnPreset.setText("Preset: " + PRESETS[presetIdx][1]);
+            try {
+                JSONObject m = new JSONObject();
+                m.put("type", "preset");
+                m.put("name", PRESETS[presetIdx][0]);
+                sendWs(m);
+            } catch (Exception ignored) { }
+            status("Preset: " + PRESETS[presetIdx][1] + " — what the coach optimizes for.");
+        });
+        findViewById(R.id.btnShh).setOnClickListener(v -> {
+            try {
+                sendWs(new JSONObject().put("type", "pause"));
+            } catch (Exception ignored) { }
+            status("Paused. Talk to resume.");
+        });
 
         btnSrcPhone.setOnClickListener(v -> setSource(false));
         btnSrcGlasses.setOnClickListener(v -> setSource(true));
@@ -248,6 +272,8 @@ public class MainActivity extends Activity {
                     hello.put("type", "hello");
                     hello.put("provider", "spark");
                     hello.put("source", glassesMode ? "glasses" : "phone");
+                    hello.put("guide", true);
+                    hello.put("preset", PRESETS[presetIdx][0]);
                     if (!missionId.isEmpty()) hello.put("mission_id", missionId);
                     webSocket.send(hello.toString());
                 } catch (Exception ignored) { }
@@ -260,6 +286,12 @@ public class MainActivity extends Activity {
                     String type = ev.optString("type");
                     if ("done".equals(type)) {
                         speak(ev.optString("text"));
+                    } else if ("say".equals(type)) {
+                        String line = ev.optString("text");
+                        runOnUiThread(() -> tvStep.setText(line));
+                        speak(line);
+                    } else if ("observation".equals(type)) {
+                        status("Eyes: " + ev.optString("text"));
                     } else if ("state".equals(type) && ev.has("mission")) {
                         JSONObject m = ev.getJSONObject("mission");
                         String label = m.optBoolean("complete")
@@ -419,6 +451,7 @@ public class MainActivity extends Activity {
                     msg.put("type", "speech");
                     msg.put("text", text);
                     msg.put("final", true);
+                    msg.put("speaker", "wearer");   // this phone's mic = the wearer
                     sendWs(msg);
                 } catch (Exception ignored) { }
                 status("Heard: " + text);
@@ -615,6 +648,17 @@ public class MainActivity extends Activity {
                 String[] winds = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
                 String wind = winds[(int) Math.round(az / 45.0) % 8];
                 tvCompass.setText(String.format(Locale.US, "Heading %03d° %s", az, wind));
+                long nowMs = System.currentTimeMillis();
+                if (connected && nowMs - lastCompassSentAt >= 1000) {
+                    lastCompassSentAt = nowMs;
+                    try {
+                        JSONObject m = new JSONObject();
+                        m.put("type", "compass");
+                        m.put("heading", az);
+                        m.put("source", glassesMode ? "glasses" : "phone");
+                        sendWs(m);
+                    } catch (Exception ignored) { }
+                }
             }
         }
 
