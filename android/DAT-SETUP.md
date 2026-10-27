@@ -8,10 +8,13 @@ glasses app did: through the **Meta AI app** on this phone, using Meta's
 
 - `DatGlasses.kt` — DAT bridge: `Wearables.initialize`, registration state,
   `Wearables.startRegistration` (opens the Meta AI flow), session via
-  `AutoDeviceSelector`, camera capability, photo frames forwarded to the
-  relay as normal session frames.
+  `AutoDeviceSelector`, camera capability, explicit `Stream.start()`, and a
+  continuous video-frame flow. Readable frames are converted to JPEG, shown on
+  the phone, and forwarded to the relay as normal session frames.
+- The app does not call the glasses connected until the first real frame is
+  decoded. Session/stream errors are surfaced instead of being hidden.
 - Source switch: **Meta glasses** mode makes this phone the controller;
-  glasses photos become the session's eyes (phone camera is the other source).
+  glasses frames become the session's eyes (phone camera is the other source).
 - Manifest carries `com.meta.wearable.mwdat.APPLICATION_ID` plus analytics
   and crash-reporting opt-outs (privacy: both off).
 
@@ -29,6 +32,8 @@ glasses app did: through the **Meta AI app** on this phone, using Meta's
 ## Honest status
 
 Compiles against the real DAT 1.0.1 SDK and the phone UI flow is in place.
-First on-glasses session is **not yet verified** — it needs the app id above
-plus the physical glasses. Video frames (H.264 stream) are future work; v1
-forwards periodic glasses photos, which the relay already diffs and coaches on.
+First on-glasses frame flow is **not yet verified on the physical glasses** —
+it needs the app id above plus the physical glasses. The original Zoth Guide
+Android source was not present on this machine; the bridge follows the public
+DAT session/stream API and the working relay pattern of one long-lived session
+with newest frames forwarded as JPEG.

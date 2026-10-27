@@ -8,7 +8,9 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.graphics.YuvImage;
 import android.hardware.Sensor;
@@ -20,6 +22,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
@@ -33,6 +36,7 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -75,13 +79,14 @@ public class MainActivity extends Activity {
     private static final int REQ_SPEECH = 9;
 
     private EditText etRelay, etToken, etGoal;
-    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvBraille, tvSound;
+    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvSound;
     private TextureView preview;
+    private ImageView ivGlasses;
     private Button btnConnect, btnSrcPhone, btnSrcGlasses;
     private boolean glassesMode = false;
     private boolean scanning = false;
-    private int eyesMode = 0;               // 0 photo, 1 braille, 2 ascii
-    private long lastBrailleAt = 0;
+    private long lastQrAt = 0;
+    private boolean glassesStreamingShown = false;
     private SoundField soundField;
     private volatile int lastHeadingDeg = -1;
     private long lastSoundSentAt = 0;
@@ -103,9 +108,12 @@ public class MainActivity extends Activity {
     private boolean connected = false;
 
     private CameraDevice camera;
+    private CameraCaptureSession captureSession;
     private ImageReader reader;
     private HandlerThread camThread;
     private Handler camHandler;
+    private Size previewSize = new Size(1280, 720);
+    private boolean cameraOpening = false;
     private long lastFrameAt = 0;
 
     @Override
@@ -119,9 +127,9 @@ public class MainActivity extends Activity {
         tvStatus = findViewById(R.id.tvStatus);
         tvGlasses = findViewById(R.id.tvGlasses);
         tvCompass = findViewById(R.id.tvCompass);
-        tvBraille = findViewById(R.id.tvBraille);
         tvSound = findViewById(R.id.tvSound);
         preview = findViewById(R.id.preview);
+        ivGlasses = findViewById(R.id.ivGlasses);
 
         sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
         soundField = new SoundField((relativeDeg, levelDb, stereo) -> {
@@ -144,17 +152,6 @@ public class MainActivity extends Activity {
                     sendWs(m);
                 } catch (Exception ignored) { }
             }
-        });
-        Button btnEyes = findViewById(R.id.btnEyes);
-        btnEyes.setOnClickListener(v -> {
-            eyesMode = (eyesMode + 1) % 3;
-            String[] names = {"photo", "braille", "ascii"};
-            tvBraille.setVisibility(eyesMode > 0 ? android.view.View.VISIBLE : android.view.View.GONE);
-            tvBraille.setTextSize(eyesMode == 2 ? 7.0f : 5.2f);
-            if (!glassesMode) {
-                preview.setVisibility(eyesMode == 0 ? android.view.View.VISIBLE : android.view.View.GONE);
-            }
-            btnEyes.setText("Eyes view: " + names[eyesMode]);
         });
         btnConnect = findViewById(R.id.btnConnect);
         btnSrcPhone = findViewById(R.id.btnSrcPhone);
@@ -207,7 +204,18 @@ public class MainActivity extends Activity {
             @Override public void onStatus(String text) { status(text); }
 
             @Override public void onJpeg(byte[] jpeg) {
-                showTextFrame(jpeg);
+                Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+                if (bmp != null) {
+                    runOnUiThread(() -> {
+                        ivGlasses.setImageBitmap(bmp);
+                        ivGlasses.setVisibility(android.view.View.VISIBLE);
+                        tvGlasses.setVisibility(android.view.View.GONE);
+                        if (!glassesStreamingShown) {
+                            glassesStreamingShown = true;
+                            status("Glasses streaming — frames are flowing.");
+                        }
+                    });
+                }
                 try {
                     JSONObject msg = new JSONObject();
                     msg.put("type", "frame");
@@ -240,8 +248,13 @@ public class MainActivity extends Activity {
         findViewById(R.id.btnTalk).setOnClickListener(v -> talk());
 
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) { openCamera(); }
-            @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { }
+            @Override public void onSurfaceTextureAvailable(SurfaceTexture st, int w, int h) {
+                openCamera();
+                configureTransform(w, h);
+            }
+            @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) {
+                configureTransform(w, h);
+            }
             @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) { closeCamera(); return true; }
             @Override public void onSurfaceTextureUpdated(SurfaceTexture st) { }
         });
@@ -254,7 +267,8 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] grants) {
-        if (code == REQ_PERMS && preview.isAvailable()) openCamera();
+        super.onRequestPermissionsResult(code, perms, grants);
+        if (code == REQ_PERMS && !glassesMode && preview.isAvailable()) openCamera();
     }
 
     private void savePrefs() {
@@ -489,7 +503,10 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------- camera frames
     private void openCamera() {
+        if (glassesMode || camera != null || cameraOpening) return;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
+        if (preview == null || !preview.isAvailable()) return;
+        cameraOpening = true;
         try {
             CameraManager mgr = (CameraManager) getSystemService(CAMERA_SERVICE);
             String camId = null;
@@ -498,15 +515,22 @@ public class MainActivity extends Activity {
                 if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) { camId = id; break; }
             }
             if (camId == null) camId = mgr.getCameraIdList()[0];
-            camThread = new HandlerThread("cam");
-            camThread.start();
-            camHandler = new Handler(camThread.getLooper());
+            StreamConfigurationMap map = mgr.getCameraCharacteristics(camId)
+                    .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            previewSize = choosePreviewSize(map == null ? null : map.getOutputSizes(SurfaceTexture.class));
+            if (camThread == null) {
+                camThread = new HandlerThread("cam");
+                camThread.start();
+                camHandler = new Handler(camThread.getLooper());
+            }
             reader = ImageReader.newInstance(640, 480, ImageFormat.YUV_420_888, 2);
             reader.setOnImageAvailableListener(r -> {
                 Image img = r.acquireLatestImage();
                 if (img == null) return;
                 try {
-                    if (scanning) {
+                    long now = System.currentTimeMillis();
+                    if (scanning && now - lastQrAt >= 200) {
+                        lastQrAt = now;
                         String payload = tryDecodeQr(img);
                         if (payload != null) {
                             scanning = false;
@@ -514,12 +538,10 @@ public class MainActivity extends Activity {
                             return;
                         }
                     }
-                    long now = System.currentTimeMillis();
                     if (connected && !glassesMode && now - lastFrameAt >= 1500) {
                         lastFrameAt = now;
                         byte[] jpeg = yuvToJpeg(img);
                         if (jpeg != null) {
-                            showTextFrame(jpeg);
                             JSONObject msg = new JSONObject();
                             msg.put("type", "frame");
                             msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
@@ -533,45 +555,113 @@ public class MainActivity extends Activity {
             }, camHandler);
             mgr.openCamera(camId, new CameraDevice.StateCallback() {
                 @Override public void onOpened(CameraDevice dev) {
+                    cameraOpening = false;
                     camera = dev;
                     startPreview();
                 }
-                @Override public void onDisconnected(CameraDevice dev) { dev.close(); }
-                @Override public void onError(CameraDevice dev, int error) { dev.close(); }
+                @Override public void onDisconnected(CameraDevice dev) {
+                    cameraOpening = false;
+                    dev.close();
+                    if (camera == dev) camera = null;
+                }
+                @Override public void onError(CameraDevice dev, int error) {
+                    cameraOpening = false;
+                    dev.close();
+                    if (camera == dev) camera = null;
+                    status("Camera error " + error + ". Reopen Phone camera mode to retry.");
+                }
             }, camHandler);
         } catch (Exception e) {
+            cameraOpening = false;
             status("Camera unavailable: " + e.getClass().getSimpleName());
         }
+    }
+
+    private Size choosePreviewSize(Size[] choices) {
+        if (choices == null || choices.length == 0) return new Size(1280, 720);
+        Size fallback = choices[0];
+        Size best = null;
+        long bestScore = Long.MAX_VALUE;
+        for (Size s : choices) {
+            if (s.getWidth() == 640 && s.getHeight() == 480) fallback = s;
+            if (s.getWidth() > 1280 || s.getHeight() > 1280) continue;
+            double ratio = s.getWidth() / (double) Math.max(1, s.getHeight());
+            long score = Math.abs(s.getWidth() * s.getHeight() - 1280L * 720L)
+                    + (long) (Math.abs(ratio - 16.0 / 9.0) * 1_000_000);
+            if (score < bestScore) {
+                bestScore = score;
+                best = s;
+            }
+        }
+        return best != null ? best : fallback;
+    }
+
+    private void configureTransform(int viewWidth, int viewHeight) {
+        if (preview == null || previewSize == null || viewWidth <= 0 || viewHeight <= 0) return;
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        Matrix matrix = new Matrix();
+        RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
+        RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
+        float centerX = viewRect.centerX();
+        float centerY = viewRect.centerY();
+        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
+            float scale = Math.max(
+                    (float) viewHeight / previewSize.getHeight(),
+                    (float) viewWidth / previewSize.getWidth());
+            matrix.postScale(scale, scale, centerX, centerY);
+            matrix.postRotate(90 * (rotation - 2), centerX, centerY);
+        } else if (rotation == Surface.ROTATION_180) {
+            matrix.postRotate(180, centerX, centerY);
+        }
+        preview.setTransform(matrix);
     }
 
     private void startPreview() {
         try {
             SurfaceTexture st = preview.getSurfaceTexture();
-            if (st == null || camera == null) return;
-            st.setDefaultBufferSize(640, 480);
+            if (st == null || camera == null || reader == null) return;
+            st.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+            configureTransform(preview.getWidth(), preview.getHeight());
             Surface surface = new Surface(st);
             List<Surface> targets = Arrays.asList(surface, reader.getSurface());
             camera.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(CameraCaptureSession session) {
+                    captureSession = session;
                     try {
                         CaptureRequest.Builder b = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                         b.addTarget(surface);
                         b.addTarget(reader.getSurface());
+                        b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                        b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
                         session.setRepeatingRequest(b.build(), null, camHandler);
-                    } catch (Exception ignored) { }
+                    } catch (Exception e) {
+                        status("Camera preview failed: " + e.getClass().getSimpleName());
+                    }
                 }
-                @Override public void onConfigureFailed(CameraCaptureSession session) { }
+                @Override public void onConfigureFailed(CameraCaptureSession session) {
+                    status("Camera preview could not start. Close other camera apps and retry.");
+                }
             }, camHandler);
-        } catch (Exception ignored) { }
+        } catch (Exception e) {
+            status("Camera preview failed: " + e.getClass().getSimpleName());
+        }
     }
 
     private void closeCamera() {
+        cameraOpening = false;
         try {
+            if (captureSession != null) captureSession.close();
             if (camera != null) camera.close();
             if (reader != null) reader.close();
             if (camThread != null) camThread.quitSafely();
         } catch (Exception ignored) { }
+        captureSession = null;
         camera = null;
+        reader = null;
+        camThread = null;
+        camHandler = null;
     }
 
     private byte[] yuvToJpeg(Image img) {
@@ -610,11 +700,24 @@ public class MainActivity extends Activity {
         glassesMode = glasses;
         btnSrcPhone.setBackgroundResource(glasses ? android.R.color.transparent : R.drawable.bg_seg_on);
         btnSrcGlasses.setBackgroundResource(glasses ? R.drawable.bg_seg_on : android.R.color.transparent);
-        preview.setVisibility(glasses ? android.view.View.GONE : android.view.View.VISIBLE);
-        tvGlasses.setVisibility(glasses ? android.view.View.VISIBLE : android.view.View.GONE);
+        if (glasses) {
+            closeCamera();
+            preview.setVisibility(android.view.View.GONE);
+            ivGlasses.setVisibility(android.view.View.GONE);
+            tvGlasses.setVisibility(android.view.View.VISIBLE);
+            tvGlasses.setText("Meta glasses\nWaiting for the first real frame…");
+            glassesStreamingShown = false;
+        } else {
+            DatGlasses.INSTANCE.disconnect();
+            glassesStreamingShown = false;
+            ivGlasses.setVisibility(android.view.View.GONE);
+            tvGlasses.setVisibility(android.view.View.GONE);
+            preview.setVisibility(android.view.View.VISIBLE);
+            if (preview.isAvailable()) openCamera();
+        }
         btnConnect.setText(glasses ? "Connect glasses" : "Connect");
         status(glasses
-                ? "Meta glasses mode. Frames come from your glasses through the relay; this phone is the controller."
+                ? "Meta glasses mode. Waiting for a real glasses stream; this phone is the controller."
                 : "Phone camera mode. This phone's camera is the eyes.");
     }
 
@@ -709,70 +812,6 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
-    private void showTextFrame(byte[] jpeg) {
-        if (eyesMode == 0 || jpeg == null) return;
-        long now = System.currentTimeMillis();
-        if (now - lastBrailleAt < 250) return;
-        lastBrailleAt = now;
-        Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
-        if (bmp == null) return;
-        String art = eyesMode == 1 ? brailleOf(bmp, 54) : asciiOf(bmp, 64);
-        runOnUiThread(() -> tvBraille.setText(art));
-    }
-
-    /** Braille eyes view: luminance -> Bayer dither + edge boost -> braille 2x4 cells. */
-    static String brailleOf(Bitmap src, int cols) {
-        int rows = Math.max(6, (int) (cols * (src.getHeight() / (float) src.getWidth()) * 0.5f));
-        int w = cols * 2, h = rows * 4;
-        Bitmap small = Bitmap.createScaledBitmap(src, w, h, true);
-        int[][] lum = new int[h][w];
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int px = small.getPixel(x, y);
-                lum[y][x] = (299 * ((px >> 16) & 0xFF) + 587 * ((px >> 8) & 0xFF) + 114 * (px & 0xFF)) / 1000;
-            }
-        }
-        int[][] bayer = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
-        int[][] dotBit = {{1, 2, 4, 64}, {8, 16, 32, 128}};
-        StringBuilder sb = new StringBuilder();
-        for (int cy = 0; cy < rows; cy++) {
-            for (int cx = 0; cx < cols; cx++) {
-                int bits = 0;
-                for (int dx = 0; dx < 2; dx++) {
-                    for (int dy = 0; dy < 4; dy++) {
-                        int x = cx * 2 + dx, y = cy * 4 + dy;
-                        int thr = (int) ((bayer[y % 4][x % 4] + 0.5f) / 16f * 255f);
-                        int edge = 0;
-                        if (x + 1 < w) edge = Math.max(edge, Math.abs(lum[y][x] - lum[y][x + 1]));
-                        if (y + 1 < h) edge = Math.max(edge, Math.abs(lum[y][x] - lum[y + 1][x]));
-                        if (lum[y][x] < thr || edge > 72) bits |= dotBit[dx][dy];
-                    }
-                }
-                sb.append((char) (0x2800 + bits));
-            }
-            if (cy < rows - 1) sb.append('\n');
-        }
-        return sb.toString();
-    }
-
-    /** ASCII eyes view: luminance -> Bayer dither -> character ramp. */
-    static String asciiOf(Bitmap src, int cols) {
-        int rows = Math.max(6, (int) (cols * (src.getHeight() / (float) src.getWidth()) * 0.44f));
-        Bitmap small = Bitmap.createScaledBitmap(src, cols, rows, true);
-        String ramp = " .:-=+*#%@";
-        int[][] bayer = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
-        StringBuilder sb = new StringBuilder();
-        for (int y = 0; y < rows; y++) {
-            for (int x = 0; x < cols; x++) {
-                int px = small.getPixel(x, y);
-                int lum = (299 * ((px >> 16) & 0xFF) + 587 * ((px >> 8) & 0xFF) + 114 * (px & 0xFF)) / 1000;
-                int v = Math.max(0, Math.min(255, 255 - lum + (bayer[y % 4][x % 4] - 8) * 4));
-                sb.append(ramp.charAt(v * (ramp.length() - 1) / 255));
-            }
-            if (y < rows - 1) sb.append('\n');
-        }
-        return sb.toString();
-    }
 
     @Override
     protected void onDestroy() {
