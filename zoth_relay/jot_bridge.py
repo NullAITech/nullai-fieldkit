@@ -143,7 +143,7 @@ async def sync_new_mission(mission) -> dict:
     try:
         lines = [f"# FieldKit Mission: {mission.goal}", "",
                  f"Mission ID: {mission.id}", ""]
-        lines += [f"- [ ] {s.text}" for s in mission.steps]
+        lines += [f"- [ ] {i}. {s.text}" for i, s in enumerate(mission.steps, 1)]
         data = await acall("jot_create", {
             "title": f"FieldKit Mission: {mission.goal}"[:120],
             "text": "\n".join(lines), "format": "markdown"})

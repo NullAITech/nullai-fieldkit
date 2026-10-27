@@ -59,7 +59,9 @@ These parts are new for the Meta Global AI Developer Hackathon:
 - **Agent tools over MCP** — any coding agent can call `see_now`, `say`, `mission_status`, `advance_step`, `jot_field_note`, `jot_mission_sync`, and `recall_second_brain` against the same live session.
 - **Hermes Jot live checklist** — creating a mission creates a Jot note; as steps complete, the checklist ticks itself off while your hands stay on the work. Say “jot down: …” and the observation lands on the note with its step context.
 - **Obsidian Second Brain** — every mission compiles into a vault engram with a live progress record, and prior jobs are recalled before planning: “last time on step 3, you noted the left bolt was stripped.”
-- **Muse Spark Open preset** — Meta's open-weight Spark (`meta-models/muse-spark-open-1026`) as an env-gated provider for partner hosts (Baseten/Modal), beside the Meta API default.
+- **Muse Spark Open presets** — Meta's open-weight Spark (`meta-models/muse-spark-open-1026`) as first-class env-gated providers for Baseten (`BASETEN_API_KEY`) and Modal (`MUSE_OPEN_MODAL_URL`/`MODAL_API_KEY`), beside the Meta API default.
+- **Web trial (PWA)** — judges without glasses open `/pwa` on the relay: camera, voice, mission planning with prior-job recall, live checklist with Jot + Obsidian sync badges, and the same proactive coach.
+- **Grounding + recap (env-gated)** — SAM 3.1 step-target boxes (drawn in the web preview) and a Muse Image completion card saved into the Obsidian engram and noted on the Jot checklist; a labelled local card stands in until Muse Image is configured.
 
 What already existed is listed plainly in [PRIOR-WORK.md](PRIOR-WORK.md). The demo only claims the new work.
 

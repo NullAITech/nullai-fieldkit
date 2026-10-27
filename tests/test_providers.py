@@ -81,13 +81,22 @@ async def test_anthropic_transport_parses_text_deltas(monkeypatch):
 
 
 def test_spark_open_preset_is_open_weights_and_env_gated(monkeypatch):
-    monkeypatch.delenv("SPARK_OPEN_API_KEY", raising=False)
+    monkeypatch.delenv("BASETEN_API_KEY", raising=False)
+    monkeypatch.delenv("MODAL_API_KEY", raising=False)
     presets = provider_presets()
     p = presets["spark-open"]
     assert p.model == "meta-models/muse-spark-open-1026"
+    assert "baseten" in p.base_url
     assert not p.configured                       # no partner key -> never routed
-    monkeypatch.setenv("SPARK_OPEN_API_KEY", "partner-key")
+    monkeypatch.setenv("BASETEN_API_KEY", "baseten-key")
     assert provider_presets()["spark-open"].configured
+    modal = provider_presets()["spark-open-modal"]
+    assert modal.model == "meta-models/muse-spark-open-1026"
+    assert not provider_presets()["spark-open-modal"].configured
+    monkeypatch.setenv("MODAL_API_KEY", "modal-key")
+    monkeypatch.setenv("MUSE_OPEN_MODAL_URL", "https://modal.example/v1")
+    modal = provider_presets()["spark-open-modal"]
+    assert modal.configured and modal.base_url == "https://modal.example/v1"
 
 
 def test_presets_register_spark_wonder_local(monkeypatch):

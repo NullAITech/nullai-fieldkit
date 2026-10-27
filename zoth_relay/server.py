@@ -13,7 +13,7 @@ import uuid
 
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
-from . import jot_bridge, second_brain
+from . import jot_bridge, recap, second_brain
 from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_checklist
 from .providers import provider_presets
 from .sessions import ACTIVE_SESSIONS, Session
@@ -432,13 +432,19 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                 ("unsafe", "off_track") else None)
         except Exception:
             pass
-        return {"event": ev_name, "say": say, "mission": m.public(), "jot": jot_res}
+        recap_res = await recap.maybe_recap(
+            m, getattr(app.state, "session_transport", None)) if m.complete else None
+        return {"event": ev_name, "say": say, "mission": m.public(),
+                "jot": jot_res, "recap": recap_res}
 
     @app.websocket("/v1/sessions")
     async def sessions(ws: WebSocket):
         ip = ws.headers.get("cf-connecting-ip") or (ws.client.host if ws.client else "?")
         try:
-            agent = relay.authenticate(_bearer(ws.headers), ip, "ws", "/v1/sessions")
+            # Header auth for apps; ?token= for browser WebSockets (PWA cannot
+            # set headers). Same agent scopes either way.
+            agent = relay.authenticate(
+                _bearer(ws.headers) or ws.query_params.get("token", ""), ip, "ws", "/v1/sessions")
             relay.check_sessions(agent, ip, via="ws")
         except RelayError as e:
             await ws.close(code=4000 + e.status, reason=e.detail[:120])
@@ -573,6 +579,27 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
     @app.get("/healthz", include_in_schema=False)
     async def healthz():
         return {"ok": True}
+
+    # Judge-facing PWA proof client (D6): same Sessions/Missions APIs as the
+    # glasses app, no glasses needed. Static shell only — all data stays
+    # behind the token-gated APIs.
+    from pathlib import Path as _Path
+
+    _pwa = _Path(__file__).parent / "pwa"
+
+    @app.get("/pwa", include_in_schema=False)
+    async def pwa_page():
+        return HTMLResponse((_pwa / "index.html").read_text(encoding="utf-8"))
+
+    @app.get("/pwa/manifest.webmanifest", include_in_schema=False)
+    async def pwa_manifest():
+        return HTMLResponse((_pwa / "manifest.webmanifest").read_text(encoding="utf-8"),
+                            media_type="application/manifest+json")
+
+    @app.get("/pwa/sw.js", include_in_schema=False)
+    async def pwa_sw():
+        return HTMLResponse((_pwa / "sw.js").read_text(encoding="utf-8"),
+                            media_type="application/javascript")
 
     @app.exception_handler(RelayError)
     async def _relay_err(_, exc: RelayError):

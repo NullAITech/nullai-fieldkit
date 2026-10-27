@@ -56,7 +56,7 @@ def test_mission_sync_creates_checklist_note(jotenv):
     data = jot_bridge.call("jot_read", {"id": res["note_id"]})
     assert "FieldKit Mission: Fix the mower" in (data.get("title") or "")
     tasks = data["tasks"]
-    assert [t["text"] for t in tasks] == ["Pull filter", "Fit new filter"]
+    assert [t["text"] for t in tasks] == ["1. Pull filter", "2. Fit new filter"]
     assert not any(t["checked"] for t in tasks)
 
 

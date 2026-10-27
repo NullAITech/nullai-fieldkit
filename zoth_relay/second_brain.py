@@ -57,11 +57,12 @@ def compile_mission(mission, events: list[dict] | None = None,
         f"mission_id: {_q(mission.id)}",
         f"goal: {_q(mission.goal)}",
         f"status: {_q(status)}",
-        "provider_plan: muse-wonder",
-        "provider_vision: muse-spark",
+        "planner_model: muse-wonder-1.0",
+        "vision_model: muse-spark-1.1",
         f"steps_total: {len(mission.steps)}",
         f"steps_done: {done}",
         f"spark_p50_ms: {int(spark_p50_ms) if spark_p50_ms else 'null'}",
+        f"jot_note_id: {_q(getattr(mission, 'jot_id', ''))}",
         f"tags: {tags}",
         "---",
     ]
@@ -85,6 +86,8 @@ def compile_mission(mission, events: list[dict] | None = None,
         body.append("")
     if getattr(mission, "jot_id", ""):
         body += ["", f"Hermes Jot checklist note: `{mission.jot_id}`"]
+    if getattr(mission, "recap", ""):
+        body += ["", "## Recap card", "", f"![[assets/{mission.recap}]]"]
     body += ["", "Pipeline: [[FieldKit Architecture & Mission Flow]] - "
              "all missions: [[FieldKit Missions.base]]"]
     out_dir = missions_dir()

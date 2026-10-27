@@ -110,13 +110,14 @@ async def _fieldkit_op(relay: Relay, agent: Agent, op: str, args: dict, ip: str,
             return {"ok": True, "mission": m.public()}
         done_n = m.current
         MISSIONS.apply_event(m.id, "advance")
-        from . import jot_bridge, second_brain
+        from . import jot_bridge, recap, second_brain
         jot_res = await jot_bridge.checkoff(m.id, done_n)
         try:
             second_brain.compile_mission(m)
         except Exception:
             pass
-        return {"ok": True, "event": "advanced", "jot": jot_res,
+        recap_res = await recap.maybe_recap(m) if m.complete else None
+        return {"ok": True, "event": "advanced", "jot": jot_res, "recap": recap_res,
                 "say": m.current_step_text or "Mission complete.", "mission": m.public()}
     if op == "say":
         sess = ACTIVE_SESSIONS.get(agent.name)

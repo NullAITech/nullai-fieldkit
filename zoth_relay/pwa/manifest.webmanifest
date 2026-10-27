@@ -1,0 +1,9 @@
+{
+  "name": "FieldKit by NullAI — Mission Mode",
+  "short_name": "FieldKit",
+  "start_url": "/pwa",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": []
+}

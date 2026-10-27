@@ -219,15 +219,22 @@ def provider_presets() -> dict[str, Provider]:
                                                     api_key_env="META_API_KEY"),
         "wonder-messages": AnthropicMessagesProvider("wonder-messages", META_BASE, wonder,
                                                      api_key_env="META_API_KEY", max_tokens=1200),
-        # Meta open weights (Best Open Weights track): Muse Spark Open on a
-        # partner host (Baseten/Modal). Env-driven: SPARK_OPEN_BASE_URL points
-        # at the endpoint, SPARK_OPEN_API_KEY carries its key. Unconfigured
-        # until both are set — never silently routed.
+        # Meta open weights (Best Open Weights track): Muse Spark Open on
+        # partner hosts. First-class per host; each is env-gated and never
+        # silently routed until its key lands (Neal claims via zoth-vault).
+        # Baseten: BASETEN_API_KEY (+ optional SPARK_OPEN_BASE_URL override).
         "spark-open": OpenAICompatProvider(
             "spark-open",
             os.environ.get("SPARK_OPEN_BASE_URL", "https://inference.baseten.co/v1"),
             os.environ.get("ZOTH_SPARK_OPEN_MODEL", "meta-models/muse-spark-open-1026"),
-            api_key_env="SPARK_OPEN_API_KEY",
+            api_key_env="BASETEN_API_KEY",
+            extra={"reasoning_effort": "minimal"}),
+        # Modal: MUSE_OPEN_MODAL_URL is the endpoint, MODAL_API_KEY its key.
+        "spark-open-modal": OpenAICompatProvider(
+            "spark-open-modal",
+            os.environ.get("MUSE_OPEN_MODAL_URL", ""),
+            os.environ.get("ZOTH_SPARK_OPEN_MODEL", "meta-models/muse-spark-open-1026"),
+            api_key_env="MODAL_API_KEY",
             extra={"reasoning_effort": "minimal"}),
         # Offline fallback: local Ollama OpenAI endpoint, no key.
         "local": OpenAICompatProvider("local", os.environ.get(

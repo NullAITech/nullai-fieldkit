@@ -51,6 +51,7 @@ class Mission:
     provider: str
     steps: list[Step] = field(default_factory=list)
     jot_id: str = ""                 # Hermes Jot checklist note mirroring this mission
+    recap: str = ""                  # recap card filename in the vault (set on completion)
 
     @property
     def current(self) -> int:

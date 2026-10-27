@@ -242,12 +242,14 @@ class Session:
             done_n = m.current
             self._mission_store.apply_event(m.id, "advance")
             # Hands-free mirror updates: Jot ticks itself, engram refreshes.
-            from . import jot_bridge, second_brain
+            from . import jot_bridge, recap, second_brain
             await jot_bridge.checkoff(m.id, done_n)
             try:
                 second_brain.compile_mission(m)
             except Exception:
                 pass
+            if m.complete:
+                await recap.maybe_recap(m, self.transport)
             nxt = m.current_step_text
             text = ev.say or (f"Next: {nxt}" if nxt else "Mission complete.")
             self.ctx.add("assistant", text)
@@ -271,7 +273,13 @@ class Session:
         obs = await self._eyes.observe(image, self._mission_text())
         if obs is None:
             return
-        await self.send({"type": "observation", "text": obs.text})
+        ev_out = {"type": "observation", "text": obs.text}
+        if m_step := (self._mission().current_step_text if self._mission() else ""):
+            from .recap import SamHighlighter
+            boxes = await SamHighlighter(self.transport).highlight(image, m_step)
+            if boxes:
+                ev_out["highlight"] = boxes
+        await self.send(ev_out)
         if await self._maybe_advance_mission(obs.text):
             return
         suggestions = await self._advisor.advise(obs, self._mission_text())

@@ -35,8 +35,9 @@ def test_compile_mission_note_frontmatter_and_body(vault):
     assert fm["mission_id"] == m.id
     assert fm["goal"] == "Fix the mower"
     assert fm["status"] == "active"
-    assert fm["provider_plan"] == "muse-wonder"
-    assert fm["provider_vision"] == "muse-spark"
+    assert fm["planner_model"] == "muse-wonder-1.0"
+    assert fm["vision_model"] == "muse-spark-1.1"
+    assert "jot_note_id" in fm
     assert fm["steps_total"] == 2 and fm["steps_done"] == 1
     assert "fieldkit" in fm["tags"] and "ray-ban-meta" in fm["tags"]
     assert "- [x] Pull filter" in text and "- [ ] Fit new filter" in text
