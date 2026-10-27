@@ -101,6 +101,10 @@ class Session:
         self.ignored_outside = 0
         self.heading: int | None = None     # last compass heading (degrees)
         self.heading_source = ""            # "phone" | "glasses"
+        self.sound_heading: int | None = None   # estimated world bearing of sound
+        self.sound_relative: int | None = None  # degrees rel. to device forward
+        self.sound_source = ""
+        self.sound_level_db: float | None = None
 
     # ------------------------------------------------------------ lifecycle
     def set_hello(self, mission: str, system: str, history_budget=None) -> None:
@@ -166,6 +170,19 @@ class Session:
             return
         self.heading_source = source if source in ("phone", "glasses") else "phone"
 
+    def on_sound(self, heading, relative, source: str = "phone", level_db=None) -> None:
+        """Estimated sound bearing (device mics + compass). Estimate, not proof."""
+        try:
+            self.sound_heading = int(heading) % 360
+            self.sound_relative = max(-180, min(180, int(relative)))
+        except (TypeError, ValueError):
+            return
+        self.sound_source = source if source in ("phone", "glasses") else "phone"
+        try:
+            self.sound_level_db = float(level_db) if level_db is not None else None
+        except (TypeError, ValueError):
+            self.sound_level_db = None
+
     def start_proactive(self, interval: float = 2.5) -> None:
         if self._proactive_task is None and self.guide_on:
             self._proactive_task = asyncio.create_task(self._proactive_loop(interval))
@@ -199,7 +216,8 @@ class Session:
             self.ctx.add("assistant", dec.text)
             await self.send({"type": "say", "text": dec.text, "reason": dec.reason})
 
-    async def on_user_speech(self, text: str, speaker: str = "wearer") -> None:
+    async def on_user_speech(self, text: str, speaker: str = "wearer",
+                             sound_relative=None) -> None:
         """Wearer voice-focus gate, then a normal (Director-aware) turn."""
         text = (text or "").strip()
         if not text:
@@ -214,7 +232,15 @@ class Session:
             self.set_paused(False)
             await self.send(self.state())
             return
-        if speaker == "other" and not self.allow_outside:
+        # Voice focus: explicit bystanders are out. An unlabelled voice arriving
+        # from well off-axis (>75 deg) is treated as outside conversation too.
+        off_axis = False
+        if speaker == "unknown" and sound_relative is not None:
+            try:
+                off_axis = abs(int(sound_relative)) > 75
+            except (TypeError, ValueError):
+                off_axis = False
+        if (speaker == "other" or off_axis) and not self.allow_outside:
             # Bystander conversation: heard, counted, never answered.
             self.ignored_outside += 1
             await self.send(self.state())
@@ -265,7 +291,9 @@ class Session:
                "history_budget": self.ctx.budget,
                "guide": self.guide_on, "preset": self.preset.name, "paused": self.paused,
                "ignored_outside": self.ignored_outside,
-               "heading": self.heading, "heading_source": self.heading_source or None}
+               "heading": self.heading, "heading_source": self.heading_source or None,
+               "sound_heading": self.sound_heading, "sound_relative": self.sound_relative,
+               "sound_source": self.sound_source or None, "sound_level_db": self.sound_level_db}
         ms = self.mission_state()
         if ms is not None:
             out["mission"] = ms

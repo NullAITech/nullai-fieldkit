@@ -32,6 +32,14 @@
             android:layout_height="wrap_content"
             android:text="Heading —"
             android:textColor="#444444"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvSound"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sound —"
+            android:textColor="#444444"
             android:textSize="12sp"
             android:layout_marginBottom="18dp" />
 

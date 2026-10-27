@@ -477,7 +477,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                 elif t == "speech" and isinstance(m.get("text"), str):
                     if m.get("final", True):
                         await sess.on_user_speech(m["text"][:2000],
-                                                  str(m.get("speaker") or "wearer"))
+                                                  str(m.get("speaker") or "unknown"),
+                                                  m.get("sound_relative"))
                 elif t == "text" and isinstance(m.get("text"), str):
                     sess.start_turn(m["text"][:2000], t)
                 elif t == "mission":
@@ -495,6 +496,9 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                     await ws.send_json(sess.state())
                 elif t == "compass":
                     sess.on_compass(m.get("heading"), str(m.get("source") or "phone"))
+                elif t == "sound":
+                    sess.on_sound(m.get("heading"), m.get("relative"),
+                                  str(m.get("source") or "phone"), m.get("level_db"))
                 elif t == "barge":
                     await sess.barge()
                 elif t == "bye":

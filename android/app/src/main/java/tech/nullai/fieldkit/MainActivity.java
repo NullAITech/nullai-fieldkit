@@ -75,13 +75,16 @@ public class MainActivity extends Activity {
     private static final int REQ_SPEECH = 9;
 
     private EditText etRelay, etToken, etGoal;
-    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvBraille;
+    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvBraille, tvSound;
     private TextureView preview;
     private Button btnConnect, btnSrcPhone, btnSrcGlasses;
     private boolean glassesMode = false;
     private boolean scanning = false;
-    private boolean brailleOn = false;
+    private int eyesMode = 0;               // 0 photo, 1 braille, 2 ascii
     private long lastBrailleAt = 0;
+    private SoundField soundField;
+    private volatile int lastHeadingDeg = -1;
+    private long lastSoundSentAt = 0;
     private MultiFormatReader qrReader;
     private SensorManager sensors;
     private final float[] grav = new float[3], mag = new float[3];
@@ -117,17 +120,41 @@ public class MainActivity extends Activity {
         tvGlasses = findViewById(R.id.tvGlasses);
         tvCompass = findViewById(R.id.tvCompass);
         tvBraille = findViewById(R.id.tvBraille);
+        tvSound = findViewById(R.id.tvSound);
         preview = findViewById(R.id.preview);
 
         sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
+        soundField = new SoundField((relativeDeg, levelDb, stereo) -> {
+            int world = (lastHeadingDeg >= 0 ? lastHeadingDeg + relativeDeg : relativeDeg + 360) % 360;
+            String near = levelDb > -38 ? "near" : "far";
+            String txt = stereo
+                    ? String.format(Locale.US, "Sound %03d° · %s", world, near)
+                    : "Sound mono · " + near;
+            runOnUiThread(() -> tvSound.setText(txt));
+            long nowMs = System.currentTimeMillis();
+            if (connected && nowMs - lastSoundSentAt >= 1000) {
+                lastSoundSentAt = nowMs;
+                try {
+                    JSONObject m = new JSONObject();
+                    m.put("type", "sound");
+                    m.put("heading", world);
+                    m.put("relative", relativeDeg);
+                    m.put("source", glassesMode ? "glasses" : "phone");
+                    m.put("level_db", Math.round(levelDb * 10) / 10.0);
+                    sendWs(m);
+                } catch (Exception ignored) { }
+            }
+        });
         Button btnEyes = findViewById(R.id.btnEyes);
         btnEyes.setOnClickListener(v -> {
-            brailleOn = !brailleOn;
-            tvBraille.setVisibility(brailleOn ? android.view.View.VISIBLE : android.view.View.GONE);
+            eyesMode = (eyesMode + 1) % 3;
+            String[] names = {"photo", "braille", "ascii"};
+            tvBraille.setVisibility(eyesMode > 0 ? android.view.View.VISIBLE : android.view.View.GONE);
+            tvBraille.setTextSize(eyesMode == 2 ? 7.0f : 5.2f);
             if (!glassesMode) {
-                preview.setVisibility(brailleOn ? android.view.View.GONE : android.view.View.VISIBLE);
+                preview.setVisibility(eyesMode == 0 ? android.view.View.VISIBLE : android.view.View.GONE);
             }
-            btnEyes.setText(brailleOn ? "Eyes view: braille" : "Eyes view: photo");
+            btnEyes.setText("Eyes view: " + names[eyesMode]);
         });
         btnConnect = findViewById(R.id.btnConnect);
         btnSrcPhone = findViewById(R.id.btnSrcPhone);
@@ -180,7 +207,7 @@ public class MainActivity extends Activity {
             @Override public void onStatus(String text) { status(text); }
 
             @Override public void onJpeg(byte[] jpeg) {
-                showBraille(jpeg);
+                showTextFrame(jpeg);
                 try {
                     JSONObject msg = new JSONObject();
                     msg.put("type", "frame");
@@ -428,6 +455,7 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------- speech in
     private void talk() {
+        if (soundField != null) soundField.stop();   // free the mic for the recognizer
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US);
@@ -491,7 +519,7 @@ public class MainActivity extends Activity {
                         lastFrameAt = now;
                         byte[] jpeg = yuvToJpeg(img);
                         if (jpeg != null) {
-                            showBraille(jpeg);
+                            showTextFrame(jpeg);
                             JSONObject msg = new JSONObject();
                             msg.put("type", "frame");
                             msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
@@ -645,6 +673,7 @@ public class MainActivity extends Activity {
             if (SensorManager.getRotationMatrix(r, null, grav, mag)) {
                 SensorManager.getOrientation(r, o);
                 int az = (int) ((Math.toDegrees(o[0]) + 360) % 360);
+                lastHeadingDeg = az;
                 String[] winds = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
                 String wind = winds[(int) Math.round(az / 45.0) % 8];
                 tvCompass.setText(String.format(Locale.US, "Heading %03d° %s", az, wind));
@@ -671,28 +700,38 @@ public class MainActivity extends Activity {
         Sensor mg = sensors.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         if (acc != null) sensors.registerListener(compassListener, acc, SensorManager.SENSOR_DELAY_UI);
         if (mg != null) sensors.registerListener(compassListener, mg, SensorManager.SENSOR_DELAY_UI);
+        if (soundField != null) soundField.start(this);
     }
 
     @Override protected void onPause() {
+        if (soundField != null) soundField.stop();
         sensors.unregisterListener(compassListener);
         super.onPause();
     }
 
-    private void showBraille(byte[] jpeg) {
-        if (!brailleOn || jpeg == null) return;
+    private void showTextFrame(byte[] jpeg) {
+        if (eyesMode == 0 || jpeg == null) return;
         long now = System.currentTimeMillis();
         if (now - lastBrailleAt < 250) return;
         lastBrailleAt = now;
         Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
         if (bmp == null) return;
-        String art = brailleOf(bmp, 54);
+        String art = eyesMode == 1 ? brailleOf(bmp, 54) : asciiOf(bmp, 64);
         runOnUiThread(() -> tvBraille.setText(art));
     }
 
-    /** Live eyes view: luminance -> ordered (Bayer 4x4) dither -> braille cells (2x4 dots). */
+    /** Braille eyes view: luminance -> Bayer dither + edge boost -> braille 2x4 cells. */
     static String brailleOf(Bitmap src, int cols) {
         int rows = Math.max(6, (int) (cols * (src.getHeight() / (float) src.getWidth()) * 0.5f));
-        Bitmap small = Bitmap.createScaledBitmap(src, cols * 2, rows * 4, true);
+        int w = cols * 2, h = rows * 4;
+        Bitmap small = Bitmap.createScaledBitmap(src, w, h, true);
+        int[][] lum = new int[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int px = small.getPixel(x, y);
+                lum[y][x] = (299 * ((px >> 16) & 0xFF) + 587 * ((px >> 8) & 0xFF) + 114 * (px & 0xFF)) / 1000;
+            }
+        }
         int[][] bayer = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
         int[][] dotBit = {{1, 2, 4, 64}, {8, 16, 32, 128}};
         StringBuilder sb = new StringBuilder();
@@ -701,15 +740,36 @@ public class MainActivity extends Activity {
                 int bits = 0;
                 for (int dx = 0; dx < 2; dx++) {
                     for (int dy = 0; dy < 4; dy++) {
-                        int px = small.getPixel(cx * 2 + dx, cy * 4 + dy);
-                        int lum = (299 * ((px >> 16) & 0xFF) + 587 * ((px >> 8) & 0xFF) + 114 * (px & 0xFF)) / 1000;
-                        int thr = (int) ((bayer[(cy * 4 + dy) % 4][(cx * 2 + dx) % 4] + 0.5f) / 16f * 255f);
-                        if (lum < thr) bits |= dotBit[dx][dy];
+                        int x = cx * 2 + dx, y = cy * 4 + dy;
+                        int thr = (int) ((bayer[y % 4][x % 4] + 0.5f) / 16f * 255f);
+                        int edge = 0;
+                        if (x + 1 < w) edge = Math.max(edge, Math.abs(lum[y][x] - lum[y][x + 1]));
+                        if (y + 1 < h) edge = Math.max(edge, Math.abs(lum[y][x] - lum[y + 1][x]));
+                        if (lum[y][x] < thr || edge > 72) bits |= dotBit[dx][dy];
                     }
                 }
                 sb.append((char) (0x2800 + bits));
             }
             if (cy < rows - 1) sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** ASCII eyes view: luminance -> Bayer dither -> character ramp. */
+    static String asciiOf(Bitmap src, int cols) {
+        int rows = Math.max(6, (int) (cols * (src.getHeight() / (float) src.getWidth()) * 0.44f));
+        Bitmap small = Bitmap.createScaledBitmap(src, cols, rows, true);
+        String ramp = " .:-=+*#%@";
+        int[][] bayer = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+        StringBuilder sb = new StringBuilder();
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
+                int px = small.getPixel(x, y);
+                int lum = (299 * ((px >> 16) & 0xFF) + 587 * ((px >> 8) & 0xFF) + 114 * (px & 0xFF)) / 1000;
+                int v = Math.max(0, Math.min(255, 255 - lum + (bayer[y % 4][x % 4] - 8) * 4));
+                sb.append(ramp.charAt(v * (ramp.length() - 1) / 255));
+            }
+            if (y < rows - 1) sb.append('\n');
         }
         return sb.toString();
     }

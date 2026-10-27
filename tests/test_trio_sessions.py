@@ -91,6 +91,21 @@ async def test_wearer_focus_ignores_bystanders():
     assert calls["n"] >= 1 and any(e["type"] == "start" for e in sent)
 
 
+async def test_sound_direction_state_and_offaxis_gate():
+    sent = []
+    s, calls = guided_session(sent)
+    s.on_sound(123, -100, "phone", -42.5)
+    st = s.state()
+    assert st["sound_heading"] == 123 and st["sound_relative"] == -100
+    assert st["sound_source"] == "phone" and st["sound_level_db"] == -42.5
+    await s.on_user_speech("side conversation at the next table",
+                           speaker="unknown", sound_relative=-100)
+    assert s.ignored_outside == 1 and calls["n"] == 0      # off-axis: no model call
+    await s.on_user_speech("what now", speaker="unknown", sound_relative=5)
+    await s._task
+    assert calls["n"] >= 1                                 # on-axis voice proceeds
+
+
 async def test_compass_state_and_shh():
     sent = []
     s, _ = guided_session(sent)
@@ -128,10 +143,13 @@ def test_ws_guide_preset_compass_and_voice_gate(env):
         ready = ws.receive_json()
         assert ready["guide"] is True and ready["preset"] == "teach-me"
         ws.send_json({"type": "compass", "heading": 42, "source": "glasses"})
+        ws.send_json({"type": "sound", "heading": 84, "relative": 42,
+                      "source": "phone", "level_db": -30.0})
         ws.send_json({"type": "speech", "text": "bystander chat", "final": True, "speaker": "other"})
         st = ws.receive_json()
         assert st["type"] == "state" and st["ignored_outside"] == 1
         assert st["heading"] == 42 and st["heading_source"] == "glasses"
+        assert st["sound_heading"] == 84 and st["sound_relative"] == 42
         ws.send_json({"type": "preset", "name": "social"})
         st = ws.receive_json()
         assert st["preset"] == "social"
