@@ -85,7 +85,7 @@ FieldKit is designed around a simple rule: **watching is not the same as acting.
 
 ## Status
 
-Hackathon build, developer preview. The current public story is the server backbone: providers, live sessions, missions, step tracking, tests, and soak checks. The glasses coach, live mode, phone-only trial, and agent tools are being connected in that order.
+Hackathon build, developer preview. Working today: the server backbone (providers, live sessions, missions, typed step tracking, the Eyes/Advisor/Director guide trio with presets, tests, and live soak checks) and the Spotter Android app (phone camera, QR pairing, missions, voice in/out, compass and sound-direction estimates, Meta glasses via the Wearables DAT video stream). Still being connected: live mode to X, agent tools over MCP, and the phone-only web trial.
 
 Repository history in this public repo is curated on purpose: the first commit is a frozen snapshot of what existed before the hackathon; later commits show only the new FieldKit work in order. Internal provenance is preserved separately by NullAI.
 

@@ -11,8 +11,8 @@ android {
         applicationId = "tech.nullai.fieldkit"
         minSdk = 30
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
         // Meta Wearables Developer Center app id. Override with -PmwdatAppId=<id>.
         manifestPlaceholders["mwdatAppId"] =
             (findProperty("mwdatAppId") as String?) ?: "REPLACE_WITH_WEARABLES_APP_ID"
