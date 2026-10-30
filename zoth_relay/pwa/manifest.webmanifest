@@ -3,7 +3,7 @@
   "short_name": "FieldKit",
   "start_url": "/pwa",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
+  "background_color": "#06070a",
+  "theme_color": "#06070a",
   "icons": []
 }
