@@ -29,13 +29,13 @@ How to follow along, in order of freshness:
 | Item | Evidence | Date |
 |---|---|---|
 | Repo is **PUBLIC** and MIT-licensed — hard submission requirement | `gh repo view NullAITech/nullai-fieldkit` → `visibility: PUBLIC`, `licenseInfo: MIT` | Oct 30 |
-| Spotter v0.2.9 debug APK built with a real DAT app id (`mwdat_app_id="0"`, Developer Mode) | `apks/Spotter-0.2.9-debug.apk`; generated `res` inspected before build | Oct 28 |
+| The debug APK on disk carries a real DAT app id, not the placeholder | `grep -a -c 'REPLACE_WITH_WEARABLES_APP_ID' android/app/build/outputs/apk/debug/app-debug.apk` → **0**; APK 41,619,990 bytes, built **Oct 30 17:05**, newer than `build.gradle.kts` (16:33) whose default is `"0"` | Oct 30 |
 | Glasses-streaming root cause found and fixed in code | v0.2.7/0.2.8 shipped the literal `REPLACE_WITH_WEARABLES_APP_ID` placeholder, so DAT could never register; `build.gradle.kts` default is now `"0"` | Oct 28 |
 | Guide trio (Eyes / Advisor / Director) wired into live sessions | commits `2c67626`, `46fa057` | Oct 26 |
 | Sessions API (WS) + Missions API with structured planner and step tracker | commits `13a2336`, `db1706b`; live smoke passed Oct 27 | Oct 27 |
 | Confirm-gated Live Mode + OBS overlay + Muse Image / SAM 3.1 recap path | commit `04b3875`, recap endpoint in `recap.py` | Oct 27 |
 | MCP agent tools `see_now` / `say` / `mission_status` / `advance_step` | commit `513178c` | Oct 26 |
-| Python relay test suite | **240 passed** at last confirmed full run (`/tmp/all6.log`) | Oct 30 |
+| Python relay test suite, current tree | **241 passed**, 1 warning, 21.16 s — `.venv/bin/python -m pytest -q` (`/tmp/all8.log`) | Oct 30 |
 
 ---
 
@@ -43,9 +43,8 @@ How to follow along, in order of freshness:
 
 | Item | State |
 |---|---|
-| Full pytest re-run after the Oct 30 naming-path changes | Running under a thermal guard; result lands in `/tmp/build-verify.log`. 240 was the last confirmed count. |
-| Android `assembleDebug` after `VoiceCapture.java`, the `MainActivity` voice/person tap paths, and the new layout rows | Same guarded run. **Last confirmed green build predates `VoiceCapture.java`** — treat the build as unverified until that log says `GRADLE_EXIT=0`. |
-| Person-naming loop (`name_person` + `◆ Name` button + live test) | Python side verified green; Android side rides on the build above. |
+| Android `assembleDebug` on the current tree | The guarded run never fired — the desktop keeps the box at 77–82 °C, so it only logged `waiting:` lines and was stopped. Evidence of the gap: the debug APK is dated **17:05**, `MainActivity.java` **17:09**. The APK predates the newest source, so the current revision is **source-verified only**. |
+| Person-naming loop (`name_person` + `◆ Name` row) | Python side verified green (241 passed). The Android half rides on the build above. |
 
 ---
 
@@ -53,7 +52,7 @@ How to follow along, in order of freshness:
 
 | Item | Impact | Notes |
 |---|---|---|
-| **Glasses first frame never observed end-to-end** | Highest — it is the demo's opening shot | Code path is correct; needs the Pixel plugged in, `adb install -r apks/Spotter-0.2.9-debug.apk`, then Meta glasses mode → Connect → approve in Meta AI. Blocked purely on device access. |
+| **Glasses first frame never observed end-to-end** | Highest — it is the demo's opening shot | Code path is correct; needs the Pixel plugged in, `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` (build output is gitignored, so it lives only on this machine), then Meta glasses mode → Connect → approve in Meta AI. Blocked purely on device access. |
 | Relay `:8770` state after the vault keepalive change | Blocks live smoke tests | It was relaunched and healthy on Oct 27; **not re-checked since**. Confirm with a health probe before relying on it. |
 | 3-minute demo video | 25% of the score, and the primary judging artifact | Not started. Uncut take, MCP beat, prior-vs-new honesty slide. |
 | $150 Meta Model API credits | Gates continued development against the real API | Claim form due Nov 4. Card must be on the account; set the spend-limit alert. |
@@ -86,7 +85,7 @@ Stage 1 is pass/fail on theme fit plus actually using Meta models — the repo c
 
 | Day | Priority | Why it moves the score |
 |---|---|---|
-| Fri Oct 30 | Confirm the build; commit and push the Oct 30 delta; get the timeline and tracking public | Depth 20% — a build that visibly compiles is table stakes for "Technical Execution" |
+| ~~Fri Oct 30~~ **done** | Python suite green (241 passed), source committed, labels + milestones D5–D10 + 14 issues public, README timeline written from the repo history. Left over: the Android build. | Depth 20% — a build that visibly compiles is table stakes for "Technical Execution" |
 | Sat Oct 31 | Plug in the Pixel, install v0.2.9, **get the glasses first frame** | Demo 25% + Impact 30% — the product is the glasses |
 | Sun Nov 1 | PWA judge path so the demo works without glasses; round out Muse tooling surface | Impact 30% + Demo 25% |
 | Mon Nov 2 | Film the 3-minute demo | Demo 25% |
