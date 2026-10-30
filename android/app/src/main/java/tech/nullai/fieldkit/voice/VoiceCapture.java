@@ -35,13 +35,8 @@ import java.io.RandomAccessFile;
 public final class VoiceCapture {
 
     public static final int RATE = 16000;
-    private static final int BLOCK = 1600;              // 100 ms
-    private static final double START_DB = -42.0;       // speech onset
-    private static final double STOP_DB = -48.0;        // trailing silence
-    private static final int MIN_MS = 400;              // shorter than this is not an utterance
-    private static final int STOP_SILENCE_MS = 700;     // pause that ends the utterance
-    private static final int MAX_MS = 12000;            // hard ceiling
-    private static final int LEAD_MS = 300;             // keep a little audio before onset
+    private static final int BLOCK = UtteranceSegmenter.BLOCK_MS * (RATE / 1000);   // 100 ms
+    private static final int MIN_MS = UtteranceSegmenter.MIN_MS;
 
     private VoiceCapture() {
     }
@@ -111,32 +106,16 @@ public final class VoiceCapture {
         AudioRecord rec = open();
         if (rec == null) return new Result(null, null, 0, 0, -90, null, "microphone is busy or unavailable");
 
-        java.util.ArrayList<short[]> blocks = new java.util.ArrayList<>();
-        int voiced = 0, silence = 0, total = 0;
-        double peak = 0;
-        boolean started = false;
-        int keepBack = Math.max(1, LEAD_MS / 100);
+        // The segmentation gate lives in UtteranceSegmenter so this path and the
+        // locked-screen listener agree on where speech starts and stops.
+        UtteranceSegmenter seg = new UtteranceSegmenter();
         try {
             rec.startRecording();
             short[] buf = new short[BLOCK];
-            while (total < MAX_MS) {
+            while (!seg.done()) {
                 int n = rec.read(buf, 0, buf.length);
                 if (n <= 0) break;
-                total += 100;
-                double db = dbOf(buf, n);
-                if (db > peak) peak = db;
-                if (!started && db > START_DB) {
-                    started = true;
-                    // keep the blocks just before onset so the first syllable is intact
-                    int from = Math.max(0, blocks.size() - keepBack);
-                    while (blocks.size() > from) blocks.remove(blocks.size() - 1);
-                }
-                if (started) {
-                    blocks.add(java.util.Arrays.copyOf(buf, n));
-                    voiced += 100;
-                    silence = db < STOP_DB ? silence + 100 : 0;
-                    if (voiced >= MIN_MS && silence >= STOP_SILENCE_MS) break;
-                }
+                seg.feed(buf, n);
             }
         } catch (Throwable ignored) {
         } finally {
@@ -144,25 +123,19 @@ public final class VoiceCapture {
             try { rec.release(); } catch (Throwable ignored) { }
         }
 
-        if (!started || voiced < MIN_MS) {
-            return new Result(null, null, 0, Math.max(0, voiced), peak, null,
+        if (!seg.spoken()) {
+            return new Result(null, null, 0, Math.max(0, seg.voicedMs()), seg.peakDb(), null,
                     "nothing above the noise floor");
         }
-        int len = 0;
-        for (short[] b : blocks) len += b.length;
-        short[] pcm = new short[len];
-        int at = 0;
-        for (short[] b : blocks) {
-            System.arraycopy(b, 0, pcm, at, b.length);
-            at += b.length;
-        }
+        short[] pcm = seg.pcm();
         float[] print = VoicePrint.fromPcm(pcm, RATE);
         double q = VoicePrint.quality(print);
         File wav = writeWav(ctx, pcm, RATE, "utterance.wav");
-        return new Result(pcm, print, q, voiced, peak, wav, null);
+        return new Result(pcm, print, q, seg.voicedMs(), seg.peakDb(), wav, null);
     }
 
-    private static AudioRecord open() {
+    /** Open a 16 kHz mono PCM16 record, or null when the mic is busy. Shared with {@link LockedListener}. */
+    static AudioRecord open() {
         int[] sources = new int[]{
                 MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.MIC,
@@ -188,16 +161,6 @@ public final class VoiceCapture {
             }
         }
         return null;
-    }
-
-    private static double dbOf(short[] buf, int n) {
-        double sum = 0;
-        for (int i = 0; i < n; i++) {
-            double v = buf[i] / 32768.0;
-            sum += v * v;
-        }
-        double rms = Math.sqrt(sum / Math.max(1, n));
-        return Math.max(-90, Math.min(0, 20 * Math.log10(Math.max(1e-6, rms))));
     }
 
     /** 44-byte RIFF header + PCM16 LE, so a recognizer can be pointed at the file. */

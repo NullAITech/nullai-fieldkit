@@ -49,6 +49,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import tech.nullai.fieldkit.people.PersonDescriptor;
+import tech.nullai.fieldkit.voice.OwnerPrintStore;
+import tech.nullai.fieldkit.voice.OwnerPrintPrefs;
 import tech.nullai.fieldkit.voice.SpeakerGate;
 import tech.nullai.fieldkit.voice.VoiceCapture;
 import tech.nullai.fieldkit.voice.VoicePrint;
@@ -964,25 +966,15 @@ public class MainActivity extends Activity {
         voiceGate = new SpeakerGate();
         enrolTakes = new float[3][];
         if (prefs != null) prefs.edit().remove(P_OWNER_PRINT).apply();
+        OwnerPrintPrefs.forget(this);       // the service reads this key too
         refreshVoiceLabel();
         status("Voice print forgotten. Talk treats every turn as unknown until you enrol again.");
     }
 
     private void saveVoicePrint() {
         if (prefs == null) return;
-        try {
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < enrolTakes.length; i++) {
-                if (i > 0) sb.append('|');
-                float[] t = enrolTakes[i];
-                if (t == null) continue;
-                for (int j = 0; j < t.length; j++) {
-                    if (j > 0) sb.append(',');
-                    sb.append(t[j]);
-                }
-            }
-            prefs.edit().putString(P_OWNER_PRINT, sb.toString()).apply();
-        } catch (Exception ignored) { }
+        // Same codec the service loads with (voice/OwnerPrintStore): one format, both sides.
+        prefs.edit().putString(P_OWNER_PRINT, OwnerPrintStore.encode(enrolTakes)).apply();
     }
 
     private void loadVoicePrint() {
@@ -990,14 +982,7 @@ public class MainActivity extends Activity {
             if (prefs == null) return;
             String raw = prefs.getString(P_OWNER_PRINT, "");
             if (raw == null || raw.isEmpty()) return;
-            List<float[]> takes = new ArrayList<>();
-            for (String part : raw.split("\\|")) {
-                if (part.isEmpty()) continue;
-                String[] cells = part.split(",");
-                float[] f = new float[cells.length];
-                for (int i = 0; i < cells.length; i++) f[i] = Float.parseFloat(cells[i]);
-                takes.add(f);
-            }
+            List<float[]> takes = OwnerPrintStore.decode(raw);
             if (takes.isEmpty()) return;
             voiceGate.enroll(takes);          // re-enrolling the takes re-calibrates the same threshold
             enrolTakes = takes.toArray(new float[0][]);
@@ -1472,6 +1457,11 @@ public class MainActivity extends Activity {
     @Override protected void onResume() {
         DatGlasses.INSTANCE.attachActivity(this);
         super.onResume();
+        // One microphone, and the screen-on path gets it: the service stops reading while
+        // the app is in front so the Talk button's one-shot capture can open the device.
+        SpotterService.setListening(this, false);
+        String heardOff = SpotterService.lastHeard();
+        if (!heardOff.isEmpty()) status("While the screen was off: " + heardOff);
         // Returning from the Meta AI registration card: continue the glasses flow the
         // moment the SDK reports REGISTERED, which is what unblocks the session.
         if (pendingRegistration && glassesMode) {
@@ -1512,6 +1502,9 @@ public class MainActivity extends Activity {
         if (keepSession) {
             SpotterService.update(this, (glassesMode ? "Glasses" : "Phone camera")
                     + " observing with the screen off — " + relayBase());
+            // Screen going dark: now the listener may take the microphone. The gate it
+            // loads is the enrolled print, so a bystander's voice is discarded, not stored.
+            SpotterService.setListening(this, true);
         }
     }
 
