@@ -10,7 +10,7 @@ mission coaching. Built for the **Meta Global AI Developer Hackathon** (indie tr
 kickoff Mon Oct 26 2026 12:00 PM ET, submissions due **Wed Nov 4, 9:00 PM ET**.
 
 **How the commit column was verified.** Each hash below was run through
-`git cat-file -e <hash>^{commit}` inside this repository. **34 of 41 resolve here.** The
+`git cat-file -e <hash>^{commit}` inside this repository. **35 of 42 resolve here.** The
 6 marked `(mirror \`…\`)` are the relay working copy's hash for the same work: they
 resolve in the `zoth-relay` mirror (checked with the same command there) but not in this
 repository, so they are shown because the build log recorded them and not as citations of
@@ -65,6 +65,7 @@ Agentic Use-Case $5K, Best Creative Build $5K.
 | 2026-10-30 17:58 | Corrected the docs to say what the screen-off loop actually does (hears, gates, keeps a WAV, transcribes only when the app is next in front) instead of implying transcription in the background. | `7c483f4` | Credibility — a judge who tries the thing must find what the README said. |
 | 2026-10-30 18:04 | **Logcat observability for the one path that cannot be tested off-device.** Both sides now log under `TAG "SpotterVoice"`: whether the microphone opened or who else holds it, how many utterances were discarded as not-you, each gated utterance's length and print score with kept-or-refused, and why the service is not listening. | `41156ae` | Depth 20% — an unobservable path is an unprovable one. |
 | 2026-10-30 | **`tools/device-smoke.sh`** — one command for the first on-device run: refuses an APK older than the newest source, confirms from `dumpsys` that the service is foreground with the microphone bit set, has the wearer lock the phone and talk, reads the log back and asserts each claim, and `--pull DIR` copies the kept WAV off the phone so the audio can be heard. Verified only as plumbing (`bash -n`, `shellcheck -S warning`, no-device path exits RC=2): **no on-device pass is claimed.** | `5be2479` | Depth 20% + Demo 25% — turns "unproven on hardware" into a repeatable one-liner. |
+| 2026-10-30 18:24 | **The kept audio reaches the recogniser when the app comes back.** A kept utterance was audio and nothing more: it sat in the cache while the app returned in front unaware of it. On resume the app now drains the cache directory oldest-first and hands each WAV to the recogniser through the same `EXTRA_AUDIO_SOURCE` path the Talk button uses, relaying each transcript with speaker `wearer` — the print gate already accepted that voice at the time, so re-testing it now would measure the wrong moment. The list is read from disk, not from the listener's memory, because the activity/service microphone handover drops the listener and not the audio; writer and reader share `KEPT_PREFIX`. Two guards: a kept utterance with no transcript must not fall through to the live recogniser, and it must not carry the camera descriptor of whoever is standing there now. Off-device: `tools/typecheck-android.sh` **0 errors / 45 classes** at 81 °C, `tools/voicecore/run.sh` **92/92**. **No on-device pass is claimed** — the drain needs a real recogniser. | `c50308f` | Depth 20% + Impact 30% — a pocket conversation that has evaporated by the time you take the phone out is not a feature. |
 
 ## Sibling repository
 
@@ -85,6 +86,9 @@ than something the participant guide states.
   type-checked, not packaged. The APK on disk predates the newest source.
 - **No on-device run of the screen-off path** — unit layer green (92/92), wiring unexercised.
   `tools/device-smoke.sh` exists to close exactly this gap; it has not been run.
+- **The kept-utterance drain is type-checked, not exercised** — `c50308f` compiles and the
+  shared segmenter passes 92 checks, but a drain needs a real recogniser: on the Pixel it should
+  print one *"From while the screen was off: …"* per kept WAV, oldest first. Untested here.
 - **Spotter v0.2.9 install pending** (since Oct 28) — the Pixel was unplugged before the
   install. v0.2.3's install was likewise pending on Oct 27.
 - **DAT audio direction-of-arrival not implemented** — honestly staged as future work; sound
