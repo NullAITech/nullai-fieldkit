@@ -2,7 +2,7 @@
 
 Live status board for the **Meta Global AI Developer Hackathon** (indie track, solo).
 Event: kickoff Mon Oct 26 12:00 PM ET → **submission Wed Nov 4, 9:00 PM ET** (target 6:00 PM).
-Last updated: **Fri 2026-10-30 late** (screen-off listening landed and committed — `0ff6f45`).
+Last updated: **Fri 2026-10-30 late** (screen-off listening landed and committed — `0ff6f45`; the on-device smoke test that closes it out now exists — `tools/device-smoke.sh`).
 
 How to follow along, in order of freshness:
 
@@ -39,6 +39,8 @@ How to follow along, in order of freshness:
 | Android **Java source type-checks** on the current tree — including the 17:09 `MainActivity.java` edit the APK predates | `tools/typecheck-android.sh` → **TYPECHECK OK, 0 errors, 45 classes** (1007 classpath jars, under `nice`). Negative control: an injected bad call + bad type in a scratch copy exits RC=1 with 2 errors, so the pass is not vacuous. **This is not `assembleDebug`** — no AAPT2, dexing, manifest merge or packaging. | Oct 30 |
 | **Screen-off listening works at the unit level** — the microphone read loop, the utterance segmenter it shares with the screen-on path, and the enrolled-print codec | `bash tools/voicecore/run.sh` → **92 passed / 0 failed** (VoiceCoreTest 41, SegmenterCheck 31, OwnerPrintCheck 20), RC=0. Android-free: no device, no SDK, no emulator. Writing the segmenter harness found a real bug — trailing silence counted as voicing, so a 200 ms bang plus quiet passed the 400 ms minimum; `voicedMs()` now counts only blocks at or above `STOP_DB`. | Oct 30 |
 | Python relay test suite, current tree | **241 passed**, 1 warning, 21.16 s — `.venv/bin/python -m pytest -q` (`/tmp/all8.log`) | Oct 30 |
+| `tools/device-smoke.sh` exists and its own plumbing is sound | `bash -n` OK; `shellcheck -S warning` clean; `--help` prints the header; with no phone attached it exits **RC=2** with `no device: adb sees no attached phone in the 'device' state`. Steps 2–6 (stale-APK refusal, install, `dumpsys` foreground/mic-bit check, `logcat` assertions, WAV pull) are **unexercised until a phone is attached** — the script is written against the literal `SpotterVoice` log strings read out of the source, not invented ones. | Oct 30 |
+| `meta-dev-skills` is live on GitHub | `gh repo view NullAITech/meta-dev-skills` → `visibility: PUBLIC`, `licenseInfo: MIT`, `pushedAt 2026-10-30T21:27:41Z`; local == `origin/main` == `970f5ef`; 8 SKILL.md + manifest + idempotent INSTALL.sh | Oct 30 |
 
 ---
 
@@ -48,7 +50,7 @@ How to follow along, in order of freshness:
 |---|---|
 | Android `assembleDebug` on the current tree | The guarded run never fired — the desktop keeps the box at 77–82 °C, so it only logged `waiting:` lines and was stopped. Evidence of the gap: the debug APK is dated **17:05**, `MainActivity.java` **17:09**. The APK predates the newest source. **Mitigated:** the full Java tree now type-checks clean (`tools/typecheck-android.sh`, 0 errors). What is still unproven is the packaged build — resource linking, dexing, manifest merge — so the current revision is **type-checked, not packaged**. |
 | Person-naming loop (`name_person` + `◆ Name` row) | Python side verified green (241 passed). The Android half rides on the build above. |
-| **Screen-off listening on a real device** | The unit layer is green (92/92) and the whole tree type-checks, but the loop has never read a real microphone: no on-device run of `LockedListener` yet. What it must show on the Pixel: enrol a voice, lock the screen, talk, unlock — the status line should say *"While the screen was off: …"* with a count of what it kept versus refused as not-you. Also unproven on hardware: the microphone handover between the activity (`setListening(false)` on resume) and the service (`setListening(true)` on pause) — a second `AudioRecord` on this device does not fail loudly, it errors from `read()`, so the ordering matters. |
+| **Screen-off listening on a real device** | The unit layer is green (92/92) and the whole tree type-checks, but the loop has never read a real microphone: no on-device run of `LockedListener` yet. What it must show on the Pixel: enrol a voice, lock the screen, talk, unlock — the status line should say *"While the screen was off: …"* with a count of what it kept versus refused as not-you. Also unproven on hardware: the microphone handover between the activity (`setListening(false)` on resume) and the service (`setListening(true)` on pause) — a second `AudioRecord` on this device does not fail loudly, it errors from `read()`, so the ordering matters. The first on-device run is one command — `tools/device-smoke.sh` — which refuses a stale APK, checks the foreground type mask from `dumpsys`, has the wearer lock the phone and talk, then reads the log back and asserts each claim; `--pull` fetches the kept WAV so the audio itself can be heard. |
 
 ---
 
