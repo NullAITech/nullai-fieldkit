@@ -100,6 +100,7 @@ Hackathon build, developer preview.
 
 - **[docs/GAMEPLAN.md](docs/GAMEPLAN.md)** — the plan through the Nov 4 submission, ordered by the judging rubric.
 - **[docs/PROGRESS.md](docs/PROGRESS.md)** — what is verified, what is in flight, what is open, and what is unknown.
+- **[docs/TIMELINE.md](docs/TIMELINE.md)** — the same timeline as the table below, with the commit for every row checked with `git cat-file -e` (34 of 41 hashes resolve in this repo; the six relay-copy hashes resolve in the `zoth-relay` mirror) and the open blockers listed smallest-first.
 - **[Timeline](#timeline--how-this-was-built)** below — how the build actually went, day by day, taken from the repo history and the working log.
 - [ROADMAP-FOR-MUSE.md](ROADMAP-FOR-MUSE.md) — the earlier working roadmap this plan descends from.
 
@@ -118,6 +119,8 @@ Repository history in this public repo is curated on purpose: the first commit i
 
 
 ## Timeline — how this was built
+
+Every row below is one commit or one verified run. The same story with the evidence attached — hashes re-checked, mirror hashes marked, blockers listed smallest-first — is in [docs/TIMELINE.md](docs/TIMELINE.md).
 
 This is the build as it actually went, not as it was planned. Two sources: `HACKATHON-LOG.md`
 (the working log, which records what was run and what was only intended, in that order — including

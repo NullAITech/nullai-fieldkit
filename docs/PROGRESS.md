@@ -12,6 +12,7 @@ How to follow along, in order of freshness:
 | **This file** (`docs/PROGRESS.md`) | Verified state, what's in flight, what's open | Each working session |
 | `HACKATHON-LOG.md` (repo parent dir) | Raw day-by-day build log, unedited | Continuous |
 | `README.md` → Timeline | The judge-facing story of what shipped, with commits | On milestones |
+| `docs/TIMELINE.md` | That timeline with every commit hash checked against this repo (`git cat-file -e`), the relay-mirror hashes marked, and the open blockers listed smallest-first | On milestones |
 
 ---
 
