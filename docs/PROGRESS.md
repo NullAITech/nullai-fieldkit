@@ -36,6 +36,7 @@ How to follow along, in order of freshness:
 | Confirm-gated Live Mode + OBS overlay + Muse Image / SAM 3.1 recap path | commit `04b3875`, recap endpoint in `recap.py` | Oct 27 |
 | MCP agent tools `see_now` / `say` / `mission_status` / `advance_step` | commit `513178c` | Oct 26 |
 | **Meta dev skills published as its own public repo** (new work, hackathon period) | `gh repo view NullAITech/meta-dev-skills` → `visibility: PUBLIC`, MIT; commit `970f5ef`; 8/8 SKILL.md frontmatter valid, manifest matches disk | Oct 30 |
+| Android **Java source type-checks** on the current tree — including the 17:09 `MainActivity.java` edit the APK predates | `tools/typecheck-android.sh` → **TYPECHECK OK, 0 errors, 38 classes** (11 sources, 1007 classpath jars, ~9 s, under `nice`). Negative control: an injected bad call + bad type in a scratch copy exits RC=1 with 2 errors, so the pass is not vacuous. **This is not `assembleDebug`** — no AAPT2, dexing, manifest merge or packaging. | Oct 30 |
 | Python relay test suite, current tree | **241 passed**, 1 warning, 21.16 s — `.venv/bin/python -m pytest -q` (`/tmp/all8.log`) | Oct 30 |
 
 ---
@@ -44,7 +45,7 @@ How to follow along, in order of freshness:
 
 | Item | State |
 |---|---|
-| Android `assembleDebug` on the current tree | The guarded run never fired — the desktop keeps the box at 77–82 °C, so it only logged `waiting:` lines and was stopped. Evidence of the gap: the debug APK is dated **17:05**, `MainActivity.java` **17:09**. The APK predates the newest source, so the current revision is **source-verified only**. |
+| Android `assembleDebug` on the current tree | The guarded run never fired — the desktop keeps the box at 77–82 °C, so it only logged `waiting:` lines and was stopped. Evidence of the gap: the debug APK is dated **17:05**, `MainActivity.java` **17:09**. The APK predates the newest source. **Mitigated:** the full Java tree now type-checks clean (`tools/typecheck-android.sh`, 0 errors). What is still unproven is the packaged build — resource linking, dexing, manifest merge — so the current revision is **type-checked, not packaged**. |
 | Person-naming loop (`name_person` + `◆ Name` row) | Python side verified green (241 passed). The Android half rides on the build above. |
 
 ---

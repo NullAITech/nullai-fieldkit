@@ -63,6 +63,13 @@ visibility work got done and the build did not.** That is the honest delta, and 
   hours, never fired (the user's desktop pins the package at 77–82 °C and the guard aborts at ≥82 °C)
   and was then stopped. The APK on disk is dated **17:05**; `MainActivity.java` is **17:09** — the APK
   predates the newest source, so v0.2.9 is still unverified **and** uninstalled.
+- **Partial mitigation that did land (late Oct 30):** with the packaged build thermally blocked, the
+  Android **source** was type-checked heat-free instead. `tools/typecheck-android.sh` runs plain `javac`
+  over all 11 Java sources against the SDK `android.jar`, the last resource pass's generated `R`, the
+  1007 cached dependency jars, and the compiled Kotlin `DatGlasses` class → **0 errors, 38 classes**.
+  An injected bad call/type in a scratch copy returns RC=1 with 2 errors, so the pass carries real
+  signal. What it does **not** cover: AAPT2, dexing, manifest merge, packaging — it does not replace the
+  `assembleDebug` below, it only means the newest Java edits are known type-correct going in.
 - **Glasses first frame:** still unproven. Unchanged from yesterday.
 
 **Therefore D6 opens in this order:** one clean `assembleDebug` on a cool box → confirm
