@@ -66,7 +66,8 @@ visibility work got done and the build did not.** That is the honest delta, and 
 - **Partial mitigation that did land (late Oct 30):** with the packaged build thermally blocked, the
   Android **source** was type-checked heat-free instead. `tools/typecheck-android.sh` runs plain `javac`
   over all 11 Java sources against the SDK `android.jar`, the last resource pass's generated `R`, the
-  1007 cached dependency jars, and the compiled Kotlin `DatGlasses` class → **0 errors, 38 classes**.
+  the 1007 cached dependency jars, and the compiled Kotlin `DatGlasses` class → **0 errors, 38 classes**
+  (re-run after the voice/segmenter files landed: **0 errors, 45 classes**, still RC=0).
   An injected bad call/type in a scratch copy returns RC=1 with 2 errors, so the pass carries real
   signal. What it does **not** cover: AAPT2, dexing, manifest merge, packaging — it does not replace the
   `assembleDebug` below, it only means the newest Java edits are known type-correct going in.
@@ -76,6 +77,55 @@ visibility work got done and the build did not.** That is the honest delta, and 
 `REPLACE_WITH_WEARABLES_APP_ID` is absent from the merged manifest → install to the Pixel → glasses
 Connect / first frame → the phone-camera Mission Mode take, which is the take that matters even if the
 glasses never land.
+
+---
+
+## 0c. Status delta — Fri Oct 30, later the same night (supersedes 0b's "therefore")
+
+0b ended with "D6 opens with one clean `assembleDebug`." That is still the right *first* move
+but it cannot be the *only* one, because the box is what is blocking it. What changed after 0b
+was written:
+
+**Landed and verified (all pushed to `origin/main`):**
+
+- **The typecheck is no longer a late-night mitigation, it is instrumented tooling.**
+  `tools/typecheck-android.sh` now reads `x86_pkg_temp` instead of `thermal_zone0` (the zone that
+  actually governs the guard), runs under `nice -n 19` with two JIT threads, and passes the
+  classpath through a javac argfile because an inline `-cp` over 1007 jars exceeds the exec arg
+  limit. It **refuses to start above 82 °C** rather than pushing load onto a hot machine — observed
+  working: one run aborted at 82–83 °C, the retry at 79 °C returned **0 errors, 45 classes**. So
+  the newest source (including the new voice files) is type-correct going into the build.
+- **Background listening is implemented, not just planned.** `SpotterService` now owns a screen-off
+  loop (`LockedListener`) that segments speech with the same pure-Java `UtteranceSegmenter` the
+  screen-on capture uses, gates each utterance against the wearer's enrolled print, and keeps a WAV
+  — deliberately **not** transcribing, because Android's recogniser needs an Activity. **92 checks
+  pass** (`tools/voicecore/run.sh`), which is how the trailing-silence-counted-as-voicing bug was
+  found. Issue #6's wiring half is done; only the on-device proof is outstanding.
+- **The on-device proof is now one command.** `tools/device-smoke.sh` refuses an APK older than the
+  newest source, checks the foreground type mask from `dumpsys`, has the wearer lock and speak, reads
+  `logcat -s SpotterVoice:V` back and asserts each claim, and `--pull DIR` fetches the kept WAV. Both
+  sides log under `TAG "SpotterVoice"` specifically so this path is observable at all.
+- **The tracking asked for by the brief exists as three surfaces:** `README.md#timeline` (story),
+  `docs/TIMELINE.md` (story + hashes re-checked with `git cat-file -e`: 34/41 resolve here, 6 marked
+  as relay-mirror hashes, 1 in the sibling repo), `docs/PROGRESS.md` (verified/in-flight/open).
+- **`NullAITech/meta-dev-skills` is published** — PUBLIC, MIT, 8 skills, `970f5ef`.
+
+**Revised D6 opening order (Sat Oct 31) — the change is that step 1 no longer gates step 2:**
+
+1. `tools/device-smoke.sh` **the moment the phone is plugged back in.** It needs no new build: it
+   uses the APK on disk, and while that APK predates the newest source it is newer than the voice
+   wiring that the screen-off path actually lives in, so the run answers "can the service hold the
+   microphone with the screen off and gate my voice?" *today*, independently of the packaging
+   problem. Record the outcome in PROGRESS either way.
+2. `assembleDebug` on a cool box, then re-run the smoke test against the **fresh** APK (the script's
+   staleness check enforces exactly this) — then confirm `REPLACE_WITH_WEARABLES_APP_ID` is absent
+   from the merged manifest.
+3. Glasses Connect / first frame — still Meta-side-gated; if it fails again, stop spending hours
+   there and take the phone-camera Mission Mode take, which is the take that scores.
+4. Then the film, on schedule.
+
+**Standing constraint, unchanged:** the thermal guard wins. If the box is at or above 82 °C, do not
+force a packaged build — do a typecheck, write docs, or run the smoke test on the existing APK.
 
 ---
 
