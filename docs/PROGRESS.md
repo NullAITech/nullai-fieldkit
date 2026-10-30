@@ -2,7 +2,7 @@
 
 Live status board for the **Meta Global AI Developer Hackathon** (indie track, solo).
 Event: kickoff Mon Oct 26 12:00 PM ET → **submission Wed Nov 4, 9:00 PM ET** (target 6:00 PM).
-Last updated: **Fri 2026-10-30**.
+Last updated: **Fri 2026-10-30** (skills repo published, gameplan delta merged).
 
 How to follow along, in order of freshness:
 
@@ -35,6 +35,7 @@ How to follow along, in order of freshness:
 | Sessions API (WS) + Missions API with structured planner and step tracker | commits `13a2336`, `db1706b`; live smoke passed Oct 27 | Oct 27 |
 | Confirm-gated Live Mode + OBS overlay + Muse Image / SAM 3.1 recap path | commit `04b3875`, recap endpoint in `recap.py` | Oct 27 |
 | MCP agent tools `see_now` / `say` / `mission_status` / `advance_step` | commit `513178c` | Oct 26 |
+| **Meta dev skills published as its own public repo** (new work, hackathon period) | `gh repo view NullAITech/meta-dev-skills` → `visibility: PUBLIC`, MIT; commit `970f5ef`; 8/8 SKILL.md frontmatter valid, manifest matches disk | Oct 30 |
 | Python relay test suite, current tree | **241 passed**, 1 warning, 21.16 s — `.venv/bin/python -m pytest -q` (`/tmp/all8.log`) | Oct 30 |
 
 ---

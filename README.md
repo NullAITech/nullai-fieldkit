@@ -172,5 +172,6 @@ no entry features built.
 - Company: **[NullAI](https://nullai.tech)**
 - Studio: **[Zoth Studio](https://zoth.nullai.tech)**
 - Tools home: **[ZothOS](https://zothos.nullai.tech)**
+- Meta dev skills (published during the hackathon): **[NullAITech/meta-dev-skills](https://github.com/NullAITech/meta-dev-skills)** — eight agent skills for Meta's AI tooling: Model API, Muse models, open weights, Muse Code, Wearables DAT.
 
 Built by NullAI Tech. Working codename during development: **ZOTH FIELDKIT**.
