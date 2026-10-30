@@ -33,6 +33,45 @@ more feature. **(judgement: freeze features, protect the film.)**
 
 ---
 
+## 0b. Status delta — what actually landed on Fri Oct 30 (end of day)
+
+D5's stated priority was "verify the build passes; unblock glasses". What actually happened: **the
+visibility work got done and the build did not.** That is the honest delta, and D6 opens with it.
+
+**Landed and verified today:**
+
+- Repo confirmed **PUBLIC + MIT** (`gh repo view`) — the submission gate is closed, not pending.
+- **Baseline frozen as an artifact, not a promise:** the tag `baseline/pre-event-2026-10-26` points at
+  the repo's **first commit** (`7f5f463`) and is pushed to origin, so
+  `git diff baseline/pre-event-2026-10-26..main` is exactly the hackathon's work. This is what settles
+  the kickoff-date disagreement below.
+- **Tracking live on GitHub:** 7 labels, milestones **D5–D10**, 14 per-task issues, plus
+  `docs/PROGRESS.md` as the verified-state board (three separate surfaces on purpose: issues answer
+  "what's next", PROGRESS answers "what is true", `HACKATHON-LOG.md` keeps the raw record).
+- **README timeline** written from the repo's own history (`git log --all`, 26 commits): 24 dated rows,
+  each traceable to a commit or a `HACKATHON-LOG.md` section. Where the event documents disagree
+  (kickoff header Oct 26 12:00 PM ET vs the stated building period Oct 27 – Nov 4) the README states
+  both and points at the tag instead of choosing a convenient one.
+- **Python relay suite: 241 passed**, 1 warning, 21.16 s on the current tree
+  (`.venv/bin/python -m pytest -q`). Up from the 189/240 in earlier notes.
+- Oct 30 source committed in **three coherent commits with explicit paths**, so no build junk entered
+  history.
+
+**Not landed, and it matters:**
+
+- **The Android build.** A thermal-guarded verify-and-build was queued, logged `waiting:` lines for
+  hours, never fired (the user's desktop pins the package at 77–82 °C and the guard aborts at ≥82 °C)
+  and was then stopped. The APK on disk is dated **17:05**; `MainActivity.java` is **17:09** — the APK
+  predates the newest source, so v0.2.9 is still unverified **and** uninstalled.
+- **Glasses first frame:** still unproven. Unchanged from yesterday.
+
+**Therefore D6 opens in this order:** one clean `assembleDebug` on a cool box → confirm
+`REPLACE_WITH_WEARABLES_APP_ID` is absent from the merged manifest → install to the Pixel → glasses
+Connect / first frame → the phone-camera Mission Mode take, which is the take that matters even if the
+glasses never land.
+
+---
+
 ## 1. Where we actually stand (ground truth, Fri Oct 30)
 
 **Shipped and committed (this is the hackathon delta — the demo may claim all of it):**
@@ -52,7 +91,7 @@ more feature. **(judgement: freeze features, protect the film.)**
 
 | # | Open item | Why it matters | Owner |
 |---|---|---|---|
-| 1 | **Android build UNVERIFIED; v0.2.9 not installed** | if the build is broken, the flagship client is dead | you (build+adb) |
+| 1 | **Android build UNVERIFIED** — the guarded run only logged `waiting:` (box pinned 77–82 °C, abort at ≥82 °C) and was stopped; the on-disk APK is **17:05**, `MainActivity.java` **17:09**, so the APK predates the newest source. **v0.2.9 not installed.** | if the build is broken, the flagship client is dead | you (build+adb) |
 | 2 | **Glasses first frame never proven on hardware** | it's the headline story; unproven = risky to film on | Neal taps (Meta-side) |
 | 3 | **Live Mode / X RTMP not proven end-to-end** | optional bonus + viral; can sink a demo take if flaky | you |
 | 4 | **60-min bench not run; no latency graph** | Technical Depth 20% needs an artifact | you |
@@ -254,8 +293,7 @@ includes the prior/new honesty slide; a stable (unlisted-or-public) link is uplo
 - **Docs final.** README: list **every Meta model with its call site**; the prior/new split; the bench graph.
   PRIOR-WORK.md committed. Add the demo-video link near the top of README.
 - **Correctness sweep.** **Do not** run the full test suite for this (thermal rule) unless the box is idle
-  and you accept one run; rely on the earlier green state (189 passed / 2 pre-existing `test_install`
-  failures) and re-run only if something changed at freeze. Re-check: Jot/Obsidian beat, PWA, `/overlay`,
+  and you accept one run; rely on the earlier green state (**241 passed**, 1 warning — Fri Oct 30 full `.venv/bin/python -m pytest -q`, `/tmp/all8.log`) and re-run only if something changed at freeze. Re-check: Jot/Obsidian beat, PWA, `/overlay`,
   MCP tools still answer. Fix **demo-path** bugs only — no new features.
 - **Submission dry-run.** Fill the Cerebral Valley form fields offline (title, one-liner, repo URL, video
   URL, tech list). Verify: **repo is PUBLIC**, secret scan clean, video link opens **logged-out**, team/
@@ -318,13 +356,18 @@ soak > agentic beat > creative beat > community push.** All are surfaced *by* th
 
 ## 9. Submission checklist (print this, tick it Wed)
 
-- [ ] Repo **PUBLIC** at the submitted commit; only hackathon commits visible on the branch.
+- [x] Repo **PUBLIC** at the submitted commit (confirmed **Oct 30**: `visibility: PUBLIC`, MIT); only
+      hackathon commits after the tagged baseline. `git diff baseline/pre-event-2026-10-26..main` **is** the
+      hackathon delta, which is how the prior/new split is proven rather than asserted.
 - [ ] Secret scan clean (`sk-`, `ghp-`, Bearer, `.token`) on tracked files.
 - [ ] README: **every Meta model listed with its call site**; prior/new split; bench graph; video link near top.
 - [ ] PRIOR-WORK.md committed; honesty slide in the video.
 - [ ] **3-min accessible video** (captions, plain narration) on a stable, logged-out-openable link.
 - [ ] Submission **accepted** on the CV platform (read it back).
-- [ ] Credits claimed (hard cutoff **9 PM ET**); spend-limit alert = $150.
+- [ ] Credits claimed (hard cutoff **9 PM ET**); spend-limit alert = $150. *Oct 30 status: form due
+      Nov 4 — do it **before** the filming day, not during it.*
+- [ ] README **Timeline** section reads as a build story with commits behind every row; `docs/PROGRESS.md`
+      (verified state) and this file (the plan) agree with the video.
 - [ ] X viral post live; **link recorded**; engagement tracked through Nov 8.
 - [ ] Team/contributor line correct (solo → you).
 - [ ] Nothing on screen in the video that predates Oct 26 12:00 PM ET.
