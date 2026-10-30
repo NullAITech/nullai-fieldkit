@@ -97,7 +97,23 @@ from zoth_relay.server import create_app as _app
 _MOB = "zr_mobile_" + "m" * 40
 
 
-def _rest_env(tmp_path, monkeypatch):
+def _sse(text: str):
+    return httpx.Response(200, text=(f"data: {json.dumps({'choices': [{'delta': {'content': text}}]})}\n\n"
+                                     + "data: [DONE]\n\n"),
+                          headers={"content-type": "text/event-stream"})
+
+
+def _two_stage_handler(req: httpx.Request):
+    """Clarify first, then plan — the interview's normal upstream shape."""
+    body = json.loads(req.content)
+    content = body["messages"][-1]["content"]
+    prompt = content[0]["text"] if isinstance(content, list) else content
+    if "wearer answered" in prompt.lower():
+        return _sse(json.dumps({"steps": ["Do A now", "Do B next"]}))
+    return _sse(json.dumps({"questions": ["Which machine?", "What symptom?"]}))
+
+
+def _rest_env(tmp_path, monkeypatch, handler=None):
     monkeypatch.setenv("FAKE_KEY", "test-key-123")
     (tmp_path / "ws").mkdir()
     (tmp_path / "agents.yaml").write_text(_yaml.safe_dump({"agents": {
@@ -107,22 +123,10 @@ def _rest_env(tmp_path, monkeypatch):
         "allowed_dirs": [str(tmp_path / "ws")], "audit_log": str(tmp_path / "a.log"),
         "agents_file": "agents.yaml"}))
 
-    def handler(req: httpx.Request):
-        body = json.loads(req.content)
-        content = body["messages"][-1]["content"]
-        prompt = content[0]["text"] if isinstance(content, list) else content
-        if "wearer answered" in prompt.lower():
-            out = json.dumps({"steps": ["Do A now", "Do B next"]})
-        else:
-            out = json.dumps({"questions": ["Which machine?", "What symptom?"]})
-        sse = (f"data: {json.dumps({'choices': [{'delta': {'content': out}}]})}\n\n"
-               + "data: [DONE]\n\n")
-        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
-
     guard = _app(_lc(str(tmp_path / "config.yaml")))
     prov = _P("wonder", "https://up.example/v1", "m", api_key_env="FAKE_KEY")
     guard.app.state.session_providers = {"wonder": prov, "spark": prov}
-    guard.app.state.session_transport = httpx.MockTransport(handler)
+    guard.app.state.session_transport = httpx.MockTransport(handler or _two_stage_handler)
     return _TC(guard)
 
 
@@ -140,3 +144,104 @@ def test_rest_clarify_then_answers_plan(tmp_path, monkeypatch):
     body = r.json()
     assert r.status_code == 201 and body["status"] == "ready"
     assert len(body["steps"]) == 2
+
+
+def test_rest_planner_502_is_retried_before_the_client_sees_it(tmp_path, monkeypatch):
+    """The judge taps Plan once; one upstream 502 must still yield a plan."""
+    from zoth_relay import missions
+    monkeypatch.setattr(missions, "RETRY_DELAY_S", 0)
+    planner = []
+
+    def flaky(req: httpx.Request):
+        body = json.loads(req.content)
+        content = body["messages"][-1]["content"]
+        prompt = content[0]["text"] if isinstance(content, list) else content
+        if not prompt.startswith("Goal:"):
+            # Another test can leave a proactive session running, and Eyes/Advisor
+            # then share this app's transport. That is not what this test measures.
+            return _sse(json.dumps({"say": "standing by", "priority": 0}))
+        planner.append(prompt[:40])
+        if len(planner) == 1:
+            return httpx.Response(502, text="bad gateway")
+        return _two_stage_handler(req)
+
+    c = _rest_env(tmp_path, monkeypatch, handler=flaky)
+    r = c.post("/v1/missions", headers={"Authorization": f"Bearer {_MOB}"},
+               json={"goal": "fix the thing", "provider": "wonder"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "clarify" and len(r.json()["questions"]) == 2
+    assert len(planner) == 2, planner
+
+
+# --------------------------------------------------- planner blips are retried
+def _delta(text):
+    return {"type": "delta", "text": text}
+
+
+def _error(status=502):
+    return {"type": "error", "status": status, "detail": "upstream error"}
+
+
+class _Scripted:
+    """Provider stand-in that plays one script of stream events per call.
+
+    Lets a test express "the first attempt died, the second one worked" without
+    inventing a fake upstream failure mode.
+    """
+    def __init__(self, *scripts, name="scripted"):
+        self.name = name
+        self.scripts = list(scripts)
+        self.calls = 0
+
+    async def stream_events(self, turn, rid, transport=None):
+        self.calls += 1
+        for ev in self.scripts[min(self.calls - 1, len(self.scripts) - 1)]:
+            yield ev
+
+
+def test_planner_stream_retries_once_when_upstream_fails_before_output(monkeypatch):
+    """A single flaky 5xx must not hand the judge a dead Plan button."""
+    from zoth_relay import missions
+    monkeypatch.setattr(missions, "RETRY_DELAY_S", 0)
+    p, t, calls = _provider_with_upstream_failure()
+    res = plan_interview_sync(p, "fix the thing", t)
+    assert res.status == "ready" and res.steps == ["Do A", "Do B"]
+    assert len(calls) == 2
+
+
+def _provider_with_upstream_failure():
+    """First upstream call 502s, the second streams a valid checklist."""
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(502, text="bad gateway")
+        out = json.dumps({"steps": ["Do A", "Do B"]})
+        sse = (f"data: {json.dumps({'choices': [{'delta': {'content': out}}]})}\n\n"
+               + "data: [DONE]\n\n")
+        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+
+    p = OpenAICompatProvider("wonder", "https://up.example/v1", "m1",
+                             api_key_env="DEFINITELY_MISSING_KEY")
+    return p, httpx.MockTransport(handler), calls
+
+
+async def test_planner_is_not_retried_once_text_has_streamed(monkeypatch):
+    """Half a checklist already streamed: retrying could duplicate it."""
+    from zoth_relay import missions
+    monkeypatch.setattr(missions, "RETRY_DELAY_S", 0)
+    p = _Scripted([_delta('{"steps": ["Do A"]}'), _error()])
+    with pytest.raises(missions.MissionError):
+        await missions._complete(p, None, None)
+    assert p.calls == 1
+
+
+async def test_planner_raises_after_the_single_retry(monkeypatch):
+    """Two failures in a row still surface as an error — no silent hang."""
+    from zoth_relay import missions
+    monkeypatch.setattr(missions, "RETRY_DELAY_S", 0)
+    p = _Scripted([_error()])
+    with pytest.raises(missions.MissionError):
+        await missions._complete(p, None, None)
+    assert p.calls == 2

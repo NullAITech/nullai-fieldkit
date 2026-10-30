@@ -20,6 +20,7 @@ the session; the trio only decides text.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ from .missions import MissionError
 from .providers import Provider, Turn
 
 PRIORITIES = ("safety", "progress", "teaching", "social", "info")
+RETRY_DELAY_S = 1.5    # pause before the single retry of a failed trio stream
 
 
 @dataclass
@@ -92,13 +94,28 @@ class Decision:
 
 async def _complete(provider: Provider, turn: Turn,
                     transport: httpx.AsyncBaseTransport | None) -> str:
-    full: list[str] = []
-    async for ev in provider.stream_events(turn, f"t{uuid.uuid4().hex[:8]}", transport):
-        if ev.get("type") == "delta":
-            full.append(ev.get("text", ""))
-        elif ev.get("type") == "error":
-            raise MissionError(ev.get("status", 502), ev.get("detail", "provider error"))
-    return "".join(full)
+    """Collect a trio call's full text, retrying once if the stream dies before
+    any delta arrives.
+
+    Eyes/Advisor/Director share one provider and one flaky upstream; a blip used
+    to reach the wearer as the coach simply going quiet (the proactive loop's
+    guard swallows the error). Retrying only when nothing was collected cannot
+    duplicate text.
+    """
+    for attempt in (0, 1):
+        full: list[str] = []
+        try:
+            async for ev in provider.stream_events(turn, f"t{uuid.uuid4().hex[:8]}", transport):
+                if ev.get("type") == "delta":
+                    full.append(ev.get("text", ""))
+                elif ev.get("type") == "error":
+                    raise MissionError(ev.get("status", 502), ev.get("detail", "provider error"))
+            return "".join(full)
+        except MissionError:
+            if attempt or full:
+                raise
+            await asyncio.sleep(RETRY_DELAY_S)
+    raise MissionError(502, f"{provider.name} failed twice")
 
 
 def _json_obj(text: str) -> dict:

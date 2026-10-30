@@ -201,8 +201,8 @@ function connect(withMission) {
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === "ready") status("Connected · " + m.provider + " · guide on · preset " + m.preset);
-    else if (m.type === "say") speak(m.text);
-    else if (m.type === "observation") { $("obs").textContent = "Eyes: " + m.text + " — watches what changed."; drawBoxes(m.highlight); }
+    else if (m.type === "say") { speak(m.text); log("Coach: " + m.text); }
+    else if (m.type === "observation") { $("obs").textContent = "Eyes: " + m.text + " — watches what changed."; drawBoxes(m.highlight); log("Eyes: " + m.text); }
     else if (m.type === "state" && m.mission) { missionId = m.mission.id; fetchMission(); }
     else if (m.type === "error") status("Relay: " + m.detail);
   };
@@ -229,6 +229,17 @@ async function fetchMission() {
   if (r.ok) renderSteps(await r.json());
 }
 $("btnConnect").onclick = () => connect(missionId || undefined);
+async function postMission(body) {
+  // Upstream planner calls are occasionally flaky, and a judge only taps Plan
+  // once: retry a 5xx instead of handing them a dead page.
+  let r = await fetch(relayBase() + "/v1/missions", { method: "POST", headers: H(), body: JSON.stringify(body) });
+  if (!r.ok && r.status >= 500) {
+    status("Planner busy (" + r.status + ") — retrying…");
+    await new Promise(s => setTimeout(s, 1500));
+    r = await fetch(relayBase() + "/v1/missions", { method: "POST", headers: H(), body: JSON.stringify(body) });
+  }
+  return r;
+}
 async function plan(answers) {
   const goal = $("goal").value.trim(); if (!goal) return;
   const memRaw = $("memories").value.trim();
@@ -236,8 +247,8 @@ async function plan(answers) {
   const body = { goal, provider: "wonder" };
   if (answers) body.answers = answers;
   if (memRaw) body.memories = [memRaw];
-  const r = await fetch(relayBase() + "/v1/missions", { method: "POST", headers: H(), body: JSON.stringify(body) });
-  if (!r.ok) { status("Plan failed (" + r.status + "). Check relay/token."); return; }
+  const r = await postMission(body);
+  if (!r.ok) { status("Plan failed (" + r.status + "). Tap Plan to try again — if it repeats, check the relay token."); return; }
   const m = await r.json();
   if (m.status === "clarify") {
     $("qa").innerHTML = "<div class='label'>BEFORE I PLAN — QUICK QUESTIONS</div>";

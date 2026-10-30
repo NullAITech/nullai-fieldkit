@@ -13,6 +13,7 @@ One spoken sentence -> a structured checklist -> tracked steps.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ import httpx
 from .providers import Provider, Turn
 
 MAX_STEPS = 12
+RETRY_DELAY_S = 1.5    # pause before the single retry of a failed planner stream
 PLANNER_SYSTEM = (
     "You are a mission planner for a hands-free glasses coach. Break the goal into "
     "concrete physical steps the user does with their hands, in order. Each step is "
@@ -159,13 +161,27 @@ def parse_checklist(text: str) -> list[str]:
 
 async def _complete(provider: Provider, turn: Turn,
                     transport: httpx.AsyncBaseTransport | None) -> str:
-    full: list[str] = []
-    async for ev in provider.stream_events(turn, f"m{uuid.uuid4().hex[:8]}", transport):
-        if ev.get("type") == "delta":
-            full.append(ev.get("text", ""))
-        elif ev.get("type") == "error":
-            raise MissionError(ev.get("status", 502), ev.get("detail", "provider error"))
-    return "".join(full)
+    """Collect the planner's full text, retrying once if the stream dies before
+    emitting any delta.
+
+    Upstream planner calls are occasionally flaky — one 502 the moment a judge
+    taps Plan is the difference between a checklist and a dead page. Retrying
+    only when nothing was collected yet cannot duplicate text.
+    """
+    for attempt in (0, 1):
+        full: list[str] = []
+        try:
+            async for ev in provider.stream_events(turn, f"m{uuid.uuid4().hex[:8]}", transport):
+                if ev.get("type") == "delta":
+                    full.append(ev.get("text", ""))
+                elif ev.get("type") == "error":
+                    raise MissionError(ev.get("status", 502), ev.get("detail", "provider error"))
+            return "".join(full)
+        except MissionError:
+            if attempt or full:
+                raise
+            await asyncio.sleep(RETRY_DELAY_S)
+    raise MissionError(502, f"planner {provider.name} failed twice")
 
 
 @dataclass

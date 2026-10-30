@@ -65,3 +65,48 @@ def test_presets_and_custom():
     assert get_preset("nonsense").name == "get-it-done"
     c = custom_preset("social", chattiness=0.1, progress=2.0)
     assert c.name == "custom" and c.chattiness == 0.1 and c.progress == 1.0  # clamped
+
+
+# --------------------------------------------- trio blips are retried, not swallowed
+class _Scripted:
+    """Provider stand-in that plays one script of stream events per call."""
+    def __init__(self, *scripts, name="scripted"):
+        self.name = name
+        self.scripts = list(scripts)
+        self.calls = 0
+
+    async def stream_events(self, turn, rid, transport=None):
+        self.calls += 1
+        for ev in self.scripts[min(self.calls - 1, len(self.scripts) - 1)]:
+            yield ev
+
+
+def _delta(text):
+    return {"type": "delta", "text": text}
+
+
+def _error(status=502):
+    return {"type": "error", "status": status, "detail": "upstream error"}
+
+
+async def test_eyes_reply_is_retried_once_when_upstream_blips(monkeypatch):
+    """Without the retry the gap reaches the wearer as the coach going quiet."""
+    from zoth_relay import trio
+    from zoth_relay.missions import MissionError
+    monkeypatch.setattr(trio, "RETRY_DELAY_S", 0)
+    p = _Scripted([_error()], [_delta("A red mower on grass.")])
+    try:
+        out = await trio._complete(p, None, None)
+    except MissionError:                       # pragma: no cover - regression guard
+        raise AssertionError("a single blip must not surface as a dead trio call")
+    assert out == "A red mower on grass." and p.calls == 2
+
+
+async def test_trio_call_is_not_retried_once_text_has_streamed(monkeypatch):
+    from zoth_relay import trio
+    from zoth_relay.missions import MissionError
+    monkeypatch.setattr(trio, "RETRY_DELAY_S", 0)
+    p = _Scripted([_delta('{"say": "Stop'), _error()])
+    with pytest.raises(MissionError):
+        await trio._complete(p, None, None)
+    assert p.calls == 1
