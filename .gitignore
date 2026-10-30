@@ -4,3 +4,12 @@ __pycache__/
 config.yaml
 agents.yaml
 *.log
+
+# Android build output and machine-local SDK path — never commit these
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.cxx/
+*.idsig
+
