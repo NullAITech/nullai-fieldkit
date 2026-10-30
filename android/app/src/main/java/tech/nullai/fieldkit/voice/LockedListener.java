@@ -167,6 +167,35 @@ public final class LockedListener {
         if (f != null && f.exists() && !f.delete()) f.deleteOnExit();
     }
 
+    /** Name shape of the WAVs the screen-off loop keeps in the cache. */
+    public static final String KEPT_PREFIX = "locked-";
+
+    /**
+     * Kept screen-off utterances still on disk, oldest first.
+     *
+     * Read from the cache directory rather than from this instance's queue, because the
+     * service hands the microphone back when the app comes to the front and that handover
+     * drops the listener - the file on disk is the part that survives it. Files of 44 bytes
+     * or less are the WAV header with no audio in it: a write that failed, nothing to hear.
+     */
+    public static java.util.List<File> keptOnDisk(Context ctx) {
+        java.util.ArrayList<File> out = new java.util.ArrayList<>();
+        File dir = ctx == null ? null : ctx.getCacheDir();
+        File[] all = dir == null ? null
+                : dir.listFiles((d, n) -> n.startsWith(KEPT_PREFIX) && n.endsWith(".wav"));
+        if (all == null) return out;
+        java.util.Arrays.sort(all, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        for (File f : all) {
+            if (f.isFile() && f.length() > 44) out.add(f);
+        }
+        return out;
+    }
+
+    /** Delete a kept utterance the app has finished with. */
+    public static void discard(File f) {
+        if (f != null && f.exists() && !f.delete()) f.deleteOnExit();
+    }
+
     private void loop(AudioRecord rec) {
         final int block = UtteranceSegmenter.BLOCK_MS * (VoiceCapture.RATE / 1000);
         short[] buf = new short[block];
@@ -224,7 +253,7 @@ public final class LockedListener {
         }
 
         File wav = VoiceCapture.writeWav(ctx, pcm, VoiceCapture.RATE,
-                "locked-" + System.currentTimeMillis() + ".wav");
+                KEPT_PREFIX + System.currentTimeMillis() + ".wav");
         synchronized (pending) {
             pending.addLast(wav);
             while (pending.size() > MAX_QUEUED) {

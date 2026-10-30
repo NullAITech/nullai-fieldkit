@@ -49,6 +49,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import tech.nullai.fieldkit.people.PersonDescriptor;
+import tech.nullai.fieldkit.voice.LockedListener;
 import tech.nullai.fieldkit.voice.OwnerPrintStore;
 import tech.nullai.fieldkit.voice.OwnerPrintPrefs;
 import tech.nullai.fieldkit.voice.SpeakerGate;
@@ -69,6 +70,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -108,6 +110,10 @@ public class MainActivity extends Activity {
     private volatile float[] cropDesc;
     private volatile long cropDescAt = 0L;
     private boolean fileRecognizeTried = false;
+    /** Screen-off utterances waiting to be transcribed, oldest first. */
+    private final ArrayDeque<File> keptQueue = new ArrayDeque<>();
+    /** The kept utterance whose transcript the recognizer is producing right now, if any. */
+    private File keptBeingTranscribed = null;
     private float[][] enrolTakes = new float[3][];
     private int enrolAt = 0;
     private int enrolRetry = 0;
@@ -822,6 +828,34 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * Transcribe the utterances the screen-off loop kept, oldest first.
+     *
+     * The recognizer is a single Activity, so they go over one at a time: the next is handed
+     * over when the previous result arrives. Nothing is transcribed twice, because each kept
+     * WAV is deleted as it is dealt with.
+     */
+    private void drainKeptUtterances() {
+        keptQueue.clear();
+        keptQueue.addAll(LockedListener.keptOnDisk(this));
+        if (keptQueue.isEmpty()) return;
+        status("Screen-off audio waiting to be transcribed: " + keptQueue.size() + ".");
+        transcribeNextKept();
+    }
+
+    private void transcribeNextKept() {
+        File f = keptQueue.poll();
+        if (f == null) {
+            keptBeingTranscribed = null;
+            return;
+        }
+        keptBeingTranscribed = f;
+        // Everything that reached the queue cleared the print gate while the screen was off, so
+        // the voice is the wearer's - but the utterance is from a moment ago, not from now.
+        lastSpeaker = "wearer";
+        listen(f);
+    }
+
+    /**
      * Hand the recognizer the SAME utterance we just fingerprinted, so the transcript
      * and the gate verdict describe one piece of audio. Devices that ignore
      * EXTRA_AUDIO_SOURCE fall back to the live recognizer (and we stop trusting the
@@ -1055,10 +1089,21 @@ public class MainActivity extends Activity {
             return;
         }
         if (code == REQ_SPEECH) {
+            // A kept screen-off utterance and a live turn share REQ_SPEECH. Which one this is
+            // decides what happens when there is no transcript: a live turn may retry, a kept
+            // one must not.
+            File kept = keptBeingTranscribed;
             ArrayList<String> heard = (result == RESULT_OK && data != null)
                     ? data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) : null;
             if (heard == null || heard.isEmpty()) {
-                if (fileRecognizeTried) {
+                if (kept != null) {
+                    // Do NOT fall through to the live recognizer here: that would record whatever
+                    // the phone hears NOW and file it under the moment the gate accepted before.
+                    keptBeingTranscribed = null;
+                    LockedListener.discard(kept);
+                    status("Screen-off audio: no transcript for " + kept.getName() + ".");
+                    transcribeNextKept();
+                } else if (fileRecognizeTried) {
                     // The device ignored EXTRA_AUDIO_SOURCE. Speak again into the live recognizer;
                     // the speaker verdict is dropped because this is no longer the audio we measured.
                     fileRecognizeTried = false;
@@ -1072,7 +1117,7 @@ public class MainActivity extends Activity {
             }
             fileRecognizeTried = false;
             String text = heard.get(0);
-            etGoal.setText(text);
+            if (kept == null) etGoal.setText(text);
             try {
                 JSONObject msg = new JSONObject();
                 msg.put("type", "speech");
@@ -1083,7 +1128,9 @@ public class MainActivity extends Activity {
                 if (wp != null && wp.isCommand()) {
                     msg.put("command", wp.command.name().toLowerCase(Locale.US));
                 }
-                float[] d = cropDesc;
+                // A descriptor belongs to the frame in front of the camera NOW. For audio from
+                // minutes ago that is the wrong person, so the kept utterance is sent bare.
+                float[] d = kept == null ? cropDesc : null;
                 if (d != null && System.currentTimeMillis() - cropDescAt < 4000) {
                     JSONArray arr = new JSONArray();
                     for (float f : d) arr.put((double) f);
@@ -1091,7 +1138,14 @@ public class MainActivity extends Activity {
                 }
                 sendWs(msg);
             } catch (Exception ignored) { }
-            status("Heard (" + lastSpeaker + "): " + text);
+            if (kept == null) {
+                status("Heard (" + lastSpeaker + "): " + text);
+            } else {
+                keptBeingTranscribed = null;
+                LockedListener.discard(kept);
+                status("From while the screen was off: " + text);
+                transcribeNextKept();
+            }
         }
     }
 
@@ -1462,6 +1516,12 @@ public class MainActivity extends Activity {
         SpotterService.setListening(this, false);
         String heardOff = SpotterService.lastHeard();
         if (!heardOff.isEmpty()) status("While the screen was off: " + heardOff);
+        // The screen-off loop keeps the wearer's own utterances as WAVs and deliberately does not
+        // transcribe them - Android's recognizer needs an Activity. Back in front, that audio goes
+        // to the recognizer through the same EXTRA_AUDIO_SOURCE path the Talk button uses, so what
+        // is transcribed is the audio the print gate already accepted, not whatever the phone
+        // happens to hear now.
+        drainKeptUtterances();
         // Returning from the Meta AI registration card: continue the glasses flow the
         // moment the SDK reports REGISTERED, which is what unblocks the session.
         if (pendingRegistration && glassesMode) {
