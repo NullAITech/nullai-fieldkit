@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from .ask import AskError, AskTarget, stream_reply
+from .context import FocusTracker, TurnContext
 
 SILENT = "SILENT"
 GUIDE_SYSTEM = (
@@ -47,7 +48,7 @@ AGY_PROMPT = (
     "Reply with ONE short spoken sentence (max 25 words) suggesting what he could do next, or "
     "answering him. No markdown. Don't repeat a recent suggestion. "
     f"If nothing is worth saying, reply exactly {SILENT}.\n\n"
-    "MISSION: {mission}\n\nWHAT THE GLASSES SAW:\n{seen}\n\nNEAL JUST SAID: {speech}\n\n"
+    "{extra}MISSION: {mission}\n\nWHAT THE GLASSES SAW:\n{seen}\n\nNEAL JUST SAID: {speech}\n\n"
     "YOUR RECENT SUGGESTIONS:\n{recent}\n"
 )
 CAPTION_PROMPT = "Describe this image in one short sentence."
@@ -201,6 +202,9 @@ class Session:
     last_used: float = field(default_factory=time.monotonic)
     caption_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     think_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    guide_on: bool = True                                                        # muted by "guide mode off"
+    focus: FocusTracker = field(default_factory=FocusTracker)                    # what he keeps talking about
+    last_focus: str = ""
 
 
 class Guide:
@@ -225,6 +229,25 @@ class Guide:
     def reset(self, key: str):
         self.sessions.pop(key, None)
 
+    # ------------------------------------------------------- wake / focus policy
+    def _apply_commands(self, s: Session, ctx: TurnContext) -> bool:
+        """Fold an activation command into the session. -> True when the guide is muted this turn.
+
+        Commands only count from the wearer (`TurnContext.honour_command`): another voice in the
+        room can say the phrase all day and the guide stays as it is.
+        """
+        cmd = ctx.command if ctx.honour_command() else ""
+        if cmd in ("guide_off", "quiet_on"):
+            s.guide_on = False
+        elif cmd in ("guide_on", "quiet_off"):
+            s.guide_on = True
+        return not s.guide_on and not cmd
+
+    def _focus(self, s: Session, ctx: TurnContext, speech: str, captions=()) -> None:
+        """Feed what he said and saw into the decaying focus profile, then fill the focus line."""
+        ctx.focus = ctx.focus or s.focus.observe(speech, captions).line()
+        s.last_focus = ctx.focus
+
     # ------------------------------------------------------------------ hermes
     async def _complete(self, target: AskTarget, messages: list[dict], session_key: str) -> str:
         extra_headers = {"X-Hermes-Session-Id": f"zoth-guide-{session_key}"} if target.name == "hermes" else {}
@@ -233,12 +256,18 @@ class Guide:
             out.append(piece)
         return "".join(out)
 
-    async def hermes_turn(self, key: str, image: tuple[bytes, str] | None, speech: str, mission: str) -> dict:
+    async def hermes_turn(self, key: str, image: tuple[bytes, str] | None, speech: str, mission: str,
+                          ctx: TurnContext | None = None) -> dict:
         s = self.session(key)
+        ctx = ctx or TurnContext()
+        muted = self._apply_commands(s, ctx)
+        self._focus(s, ctx, speech)
+        if muted:
+            return {"text": "", "speak": False, "muted": True, "via": "mute"}
         if s.think_lock.locked():
             return {"busy": True, "speak": False, "text": ""}
         async with s.think_lock:
-            sys_txt = GUIDE_SYSTEM + (f"\nMission: {mission}" if mission else "")
+            sys_txt = GUIDE_SYSTEM + (f"\nMission: {mission}" if mission else "") + ctx.system_suffix()
             msgs = [{"role": "system", "content": sys_txt}]
             msgs += [{"role": r, "content": c} for r, c in s.turns]
             ask = f'Neal said: "{speech}"' if speech else "(Neal said nothing. Glance at the frame; speak only if useful.)"
@@ -300,11 +329,11 @@ class Guide:
                 return {"caption": cap, "new_scene": True, "temp_c": temp}
             return {"caption": cap, "new_scene": False, "temp_c": temp}
 
-    def agy_prompt(self, s: Session, speech: str, mission: str) -> str:
+    def agy_prompt(self, s: Session, speech: str, mission: str, extra: str = "") -> str:
         now = time.time()
         seen = "\n".join(f"- {int(now - ts)}s ago: {c}" for ts, c in s.seen) or "- (nothing yet)"
         recent = "\n".join(f"- {x}" for x in s.said) or "- (none)"
-        return AGY_PROMPT.format(mission=mission or "(none set)", seen=seen,
+        return AGY_PROMPT.format(mission=mission or "(none set)", seen=seen, extra=extra,
                                  speech=speech or "(nothing)", recent=recent)
 
     async def _run_agy(self, prompt: str) -> str:
@@ -329,11 +358,23 @@ class Guide:
             raise AskError(502, f"AGY exited {proc.returncode}: {errb.decode('utf-8', 'replace')[-200:]}")
         return out.decode("utf-8", "replace")
 
-    async def local_turn(self, key: str, image: tuple[bytes, str] | None, speech: str, mission: str) -> dict:
+    async def local_turn(self, key: str, image: tuple[bytes, str] | None, speech: str, mission: str,
+                         ctx: TurnContext | None = None) -> dict:
         s = self.session(key)
+        ctx = ctx or TurnContext()
+        muted = self._apply_commands(s, ctx)
+        if muted:
+            # Guide mode off: no caption model, no AGY, no spend. The wearer's voice is still
+            # transcribed on the phone, so "spotter guide mode activate" still reaches us - and
+            # what he says while muted still counts toward what he is focused on.
+            self._focus(s, ctx, speech)
+            return {"text": "", "speak": False, "muted": True, "via": "mute", "caption": None,
+                    "skipped": "muted", "transcript_len": len(s.seen)}
         cap = await self.caption(s, image) if image else {"caption": None, "skipped": "no_frame"}
+        self._focus(s, ctx, speech, [cap["caption"]] if cap.get("caption") else ())
         now = time.monotonic()
-        due = bool(speech) or (cap.get("new_scene") and now - s.last_agy >= self.cfg.agy.min_interval)
+        woke = bool(ctx.command) and ctx.honour_command()
+        due = bool(speech) or woke or (cap.get("new_scene") and now - s.last_agy >= self.cfg.agy.min_interval)
         res = {"text": "", "speak": False, "via": "local_agy", "caption": cap.get("caption"),
                "skipped": cap.get("skipped"), "temp_c": cap.get("temp_c"), "transcript_len": len(s.seen)}
         if not due:
@@ -342,7 +383,8 @@ class Guide:
             return {**res, "busy": True}
         async with s.think_lock:
             s.last_agy = now
-            text, speak = clean_reply(await self.agy_runner(self.agy_prompt(s, speech, mission)))
+            prompt = self.agy_prompt(s, speech, mission, ctx.agy_block())
+            text, speak = clean_reply(await self.agy_runner(prompt))
             if speak:
                 s.said.append(text)
             return {**res, "text": text, "speak": speak, "model": "agy"}

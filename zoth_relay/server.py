@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -19,10 +20,12 @@ from .providers import provider_presets
 from .sessions import ACTIVE_SESSIONS, FRAMES, Session
 from .trio import Advisor, Director, Eyes
 from .live import LiveError, mint_token
-from .guide import Guide
+from .guide import AgyConfig, Guide
 from .guide_stream import Conn, StreamHub
 from .tts import Tts
 from .config import Agent, Config, load_config
+from .context import TurnContext
+from .people import People
 from .core import Relay, RelayError
 from .dashboard import DASHBOARD_HTML
 from .openapi_actions import actions_schema
@@ -84,6 +87,17 @@ class GuideTurnRequest(BaseModel):
     speech: str | None = Field(None, max_length=2000)
     mission: str | None = Field(None, max_length=2000)
     reset: bool = False
+    # --- optional turn context (older phone builds send none of these; the prompt is unchanged) ---
+    speaker: str | None = Field(None, max_length=16, description="wearer | other | unknown")
+    command: str | None = Field(None, max_length=32, description="WakePhrase command, e.g. guide_on")
+    focus: str | None = Field(None, max_length=200, description="what the wearer is on about")
+    person_seen: str | None = Field(None, max_length=300, description="re-sighting cue line")
+    person_new: bool = False
+    name: str | None = Field(None, max_length=80, description="a name the wearer typed or said")
+    descriptor: list[float] | None = Field(
+        None, max_length=512,
+        description="PersonDescriptor from the phone, L2-normalised. Anonymous on its own: it can "
+                    "only match a person the wearer has already named.")
 
 
 def client_ip(req) -> str:
@@ -202,6 +216,74 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                           expires_at=out["expires_at"])  # never the token itself
         return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
+    def people_store(gcfg=None):
+        """The people HE named, kept beside the guide workspace under the 0700 state dir.
+        Built once and shared, so the REST and session paths read one store, never two."""
+        people = getattr(app.state, "people", None)
+        if people is None:
+            wd = getattr(getattr(gcfg, "agy", None), "workdir", None) or AgyConfig().workdir
+            state_dir = os.path.dirname(os.path.expanduser(wd)) or os.path.expanduser("~")
+            people = app.state.people = People(os.path.join(state_dir, "people.json"))
+        return people
+
+    def sighting(gcfg, descriptor, person_new=False):
+        """Match a bare descriptor from the phone against the people he named himself.
+        Returns (seen_line, seen_new). A face NEVER names anyone: seen_line is only ever the
+        reflection of a person the wearer already named, and an unnamed face stays "someone
+        in view" - never identified, never described back."""
+        seen_line, seen_new = "", bool(person_new)
+        if descriptor:
+            ob = people_store(gcfg).observe(descriptor)
+            if ob["status"] == "known":
+                seen_line = ob["reflection"]
+            else:
+                seen_new = True                        # matched a stranger, or never seen before
+        return seen_line, seen_new
+
+    def name_person(gcfg, desc, name, speaker) -> str:
+        """The wearer typed or said a name for the person in frame. Returns it if it counted.
+
+        A name is written ONLY from the wearer's own words and ONLY together with a descriptor to
+        bind it to - a name with no descriptor would be a free-floating claim about somebody.
+        Another voice in the room cannot name anyone, and nothing here ever derives a name from a
+        face: this is the only way a name enters the store."""
+        raw = name.strip()[:80] if isinstance(name, str) else ""
+        if not raw or not desc:
+            return ""
+        if speaker not in (None, "") and speaker != "wearer":
+            return ""                           # a bystander cannot put a name in his memory
+        people_store(gcfg).remember(desc, raw)
+        return raw
+
+    def ws_ctx(sess, m: dict, agent, ip):
+        """This turn's guidance context, built from a session message. None when the phone sent
+        nothing but text, so an older build's prompt stays unchanged. Speaker, focus and
+        sightings only sharpen the guide - and a descriptor alone can NEVER name anyone: the
+        relay matches it against people the WEARER named himself."""
+        fields = ("speaker", "command", "focus", "person_seen", "person_new", "descriptor")
+        if not any(m.get(k) not in (None, "", False, []) for k in fields):
+            return None
+        raw = m.get("descriptor")
+        try:
+            desc = [float(x) for x in raw] if isinstance(raw, (list, tuple)) and raw else None
+        except (TypeError, ValueError):
+            desc = None                        # malformed: ignore, never invent a match
+        if desc is not None and len(desc) > 512:
+            desc = None
+        gcfg = getattr(sess, "gcfg", None)
+        if gcfg is None and not getattr(sess, "gcfg_tried", False):
+            try:
+                gcfg = relay.check_guide(agent, ip)
+            except Exception:
+                gcfg = None                    # sessions are not guide-gated; sightings degrade only
+            sess.gcfg, sess.gcfg_tried = gcfg, True
+        seen_line, seen_new = sighting(gcfg, desc, bool(m.get("person_new")))
+        if name_person(gcfg, desc, m.get("name"), m.get("speaker")):
+            seen_line, seen_new = "", False     # he just named them: acknowledge, never "back in view"
+        body = {k: m.get(k) for k in fields}
+        body["person_seen"], body["person_new"] = seen_line, bool(seen_new)
+        return TurnContext.from_body(body, people_store(gcfg).prompt_lines())
+
     @app.post("/v1/guide/turn", operation_id="guideTurn")
     async def guide_turn(request: Request, body: GuideTurnRequest, agent: Agent = Depends(auth)):
         ip = client_ip(request)
@@ -217,10 +299,15 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             image = decode_image(body.image) if body.image else None
             t0 = time.monotonic()
             speech, mission = (body.speech or "").strip(), (body.mission or "").strip()
+            seen_line, seen_new = sighting(gcfg, body.descriptor, body.person_new)
+            if name_person(gcfg, body.descriptor, body.name, body.speaker):
+                seen_line, seen_new = "", False
+            ctx = TurnContext.from_body(body.model_dump(), people_store(gcfg).prompt_lines())
+            ctx.person_seen, ctx.person_new = seen_line, ctx.person_new or seen_new
             if body.mode == "hermes":
-                out = await g.hermes_turn(key, image, speech, mission)
+                out = await g.hermes_turn(key, image, speech, mission, ctx)
             else:
-                out = await g.local_turn(key, image, speech, mission)
+                out = await g.local_turn(key, image, speech, mission, ctx)
         except AskError as e:
             relay.audit.write("guide_turn", agent=agent.name, ip=ip, via="rest", mode=body.mode,
                               result="error", status=e.status)
@@ -594,6 +681,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                     sess.on_clip(m["video_url"])
                 elif t == "speech" and isinstance(m.get("text"), str):
                     if m.get("final", True):
+                        # live context first: speaker, honest command, focus, sighting
+                        sess.set_live(ws_ctx(sess, m, agent, ip))
                         await sess.on_user_speech(m["text"][:2000],
                                                   str(m.get("speaker") or "unknown"),
                                                   m.get("sound_relative"))

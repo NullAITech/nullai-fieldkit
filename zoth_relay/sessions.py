@@ -42,6 +42,7 @@ import uuid
 import httpx
 
 from .ask import AskError, decode_image
+from .context import FocusTracker
 from .missions import assess_step, jot_command_text
 from .providers import Provider, Turn
 from .trio import Advisor, Director, Eyes, Preset, custom_preset, get_preset
@@ -100,6 +101,8 @@ class Session:
         self.ctx = BoundedContext(history_budget)
         self.mission = ""
         self.system = ""
+        self.live = None          # per-turn guidance context (speaker/focus/sighting), see set_live
+        self.focus = FocusTracker()      # what he is working on, decayed over speech + captions
         self._last_hash: str | None = None
         self._pending_frame: tuple[bytes, str] | None = None
         self._pending_clip: str | None = None
@@ -119,6 +122,9 @@ class Session:
         self._proactive_task: asyncio.Task | None = None
         self.allow_outside = False          # wearer voice-focus: ignore bystanders
         self.ignored_outside = 0
+        # Coaching silenced by the WEARER's own wake command (honoured() gate only). Distinct
+        # from `paused`: paused is the momentary "shh" that his next utterance clears.
+        self.muted = False
         self._last_assess_text = ""         # auto step-tracking dedupe/throttle
         self._last_assess_at = 0.0
         self.heading: int | None = None     # last compass heading (degrees)
@@ -136,6 +142,34 @@ class Session:
 
     def set_mission(self, text: str) -> None:
         self.mission = text or ""
+
+    def set_live(self, ctx=None) -> None:
+        """Attach the per-turn guidance context built by the relay (speaker, honoured
+        command, focus, person sighting). Replaced each turn; None or an empty ctx
+        leaves the provider prompt byte-identical to an older build's.
+
+        An HONOURED guide_off/quiet_on/guide_on by the wearer moves coaching with it, so the
+        wake words work by voice alone. A bystander saying them changes nothing: the gate is
+        honoured() (wearer, or an old build that never gated the voice), never the raw words.
+        Coaching is silenced through `muted`, not `paused`: the wearer's next utterance clears
+        paused (he is the one talking), which would undo his own command instantly."""
+        self.live = ctx
+        if ctx is None:
+            return
+        hon = ctx.honoured()
+        if hon in ("guide_off", "quiet_on"):
+            self.muted = True
+        elif hon in ("guide_on", "quiet_off"):
+            self.muted = False
+
+    def live_suffix(self, speech: str = "") -> str:
+        """The context block for the next turn: the speaker line, an honoured command
+        hint, what he has been focused on, and any sighting. Empty when nothing applies."""
+        ctx = self.live
+        if ctx is None:
+            return ""
+        ctx.focus = ctx.focus or self.focus.observe(speech or "").line()
+        return ctx.system_suffix()
 
     # ------------------------------------------------------------ mission attach (D3)
     def attach_mission(self, store, mission_id: str) -> None:
@@ -266,7 +300,7 @@ class Session:
 
     async def proactive_tick(self) -> None:
         """One Eyes->Advisor->Director pass over the latest changed frame."""
-        if not self.guide_on or self.closed or self.paused:
+        if not self.guide_on or self.closed or self.paused or self.muted:
             return
         image, self._pending_frame = self._pending_frame, None
         if image is None:
@@ -325,6 +359,12 @@ class Session:
         jot_text = jot_command_text(text)
         if jot_text is not None and speaker == "wearer":
             await self.jot_down(jot_text)
+            return
+        if self.muted and not (self.live is not None and self.live.honoured()):
+            # The wearer turned coaching off by voice. He is still transcribed and Jot still
+            # hears him, but the guide spends nothing and says nothing until he turns it back on
+            # (the turn carrying that command is answered, so he gets his acknowledgement).
+            await self.send(self.state())
             return
         self.start_turn(text, "speech")
 
@@ -390,6 +430,7 @@ class Session:
                "frames_sent": self.frames_sent, "history_chars": self.ctx.chars,
                "history_budget": self.ctx.budget,
                "guide": self.guide_on, "preset": self.preset.name, "paused": self.paused,
+               "muted": self.muted,
                "ignored_outside": self.ignored_outside,
                "heading": self.heading, "heading_source": self.heading_source or None,
                "sound_heading": self.sound_heading, "sound_relative": self.sound_relative,
@@ -404,7 +445,11 @@ class Session:
         gen = self.gen
         image, self._pending_frame = self._pending_frame, None
         clip, self._pending_clip = self._pending_clip, None
-        turn = Turn(prompt=prompt, system=self.system, mission=self._mission_text(),
+        sys_prompt = self.system
+        live = self.live_suffix(prompt)
+        if live:
+            sys_prompt = f"{sys_prompt}\n\n{live}" if sys_prompt else live
+        turn = Turn(prompt=prompt, system=sys_prompt, mission=self._mission_text(),
                     history=self.ctx.history(), image=image, video_url=clip)
         t0 = time.monotonic()
         full: list[str] = []

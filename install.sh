@@ -31,8 +31,14 @@ log() { printf '\e[1;33m[zoth-relay]\e[0m %s\n' "$*"; }
 # 0. distro detection ---------------------------------------------------------
 . "${OS_RELEASE:-/etc/os-release}" 2>/dev/null || { echo "no /etc/os-release"; exit 1; }
 ids=" ${ID:-} ${ID_LIKE:-} "
+# A caller that points OS_RELEASE at a specific file (tests, image builds) means "this IS the
+# distro". The host probes below would otherwise report THIS machine for someone else's fixture,
+# so they are only consulted when the caller left OS_RELEASE alone.
+host=0
+[[ -e /etc/zothos-release || -d /usr/share/zothos ]] && host=1
+[[ -n ${OS_RELEASE:-} ]] && host=0
 if [[ ${ID:-} == parrot || $ids == *" parrot "* ]]; then DISTRO=parrot
-elif [[ ${ID:-} == zothos || ${NAME:-} == *ZOTH* || -e /etc/zothos-release || -d /usr/share/zothos ]]; then DISTRO=zothos
+elif [[ ${ID:-} == zothos || ${NAME:-} == *ZOTH* || $host -eq 1 ]]; then DISTRO=zothos
 elif [[ $ids == *" debian "* || $ids == *" ubuntu "* ]]; then DISTRO=debian
 else echo "unsupported distro '${ID:-?}' (need Debian-based: ZOTHOS, Parrot, Debian)"; exit 1; fi
 log "detected: $DISTRO (${PRETTY_NAME:-$ID})"
