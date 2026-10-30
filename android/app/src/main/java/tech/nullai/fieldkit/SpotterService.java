@@ -15,6 +15,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.util.Log;
 
 /**
  * Keeps a Spotter session alive with the screen locked or the phone asleep.
@@ -167,6 +168,8 @@ public class SpotterService extends Service {
     private void startListening() {
         if (listener != null && listener.isRunning()) return;
         if (!LockedListener.available(this)) {
+            Log.i(LockedListener.TAG, "not starting: RECORD_AUDIO is not granted (screen-off "
+                    + "listening stays off; the screen-on capture is unaffected)");
             updateNotice("Spotter is observing (screen-off listening needs the microphone permission).");
             return;
         }
@@ -183,8 +186,13 @@ public class SpotterService extends Service {
             updateNotice(noticeLine());
         });
         if (listener == null) {
+            Log.i(LockedListener.TAG, "not starting: the microphone could not be opened");
             updateNotice("Spotter is observing (the microphone is busy - listening starts when it frees up).");
         } else {
+            Log.i(LockedListener.TAG, "listening while the screen is off ("
+                    + (OwnerPrintPrefs.load(this) == null ? "no enrolled voice - nothing will be "
+                    + "refused, and every utterance counts as the wearer" : "wearer enrolled")
+                    + ")");
             updateNotice(noticeLine());
         }
     }
@@ -192,7 +200,10 @@ public class SpotterService extends Service {
     private void stopListening() {
         LockedListener l = listener;
         listener = null;
-        if (l != null) l.stop();
+        if (l != null) {
+            Log.i(LockedListener.TAG, "handing the microphone back: " + l.describe());
+            l.stop();
+        }
     }
 
     /**

@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioRecord;
 import android.os.SystemClock;
+import android.util.Log;
 
 import java.io.File;
 import java.util.ArrayDeque;
@@ -70,6 +71,13 @@ public final class LockedListener {
         void onUtterance(Result r);
     }
 
+    /**
+     * logcat tag for the screen-off path. This loop is the one part of the app that cannot
+     * be exercised without a phone, so it says out loud what it is doing: whether the mic
+     * opened, what each utterance scored, and how many were refused.
+     */
+    public static final String TAG = "SpotterVoice";
+
     /** Utterances kept while nobody is looking. One file only, and the newest wins. */
     private static final int MAX_QUEUED = 3;
 
@@ -110,22 +118,29 @@ public final class LockedListener {
 
     private boolean spawn() {
         AudioRecord rec = VoiceCapture.open();
-        if (rec == null) return false;
+        if (rec == null) {
+            Log.w(TAG, "screen-off listening NOT started: the microphone is held by someone else");
+            return false;
+        }
         running = true;
         thread = new Thread(() -> loop(rec), "spotter-locked-listener");
         thread.setDaemon(true);
         thread.start();
+        Log.i(TAG, "screen-off listening started (16 kHz mono PCM16, gate "
+                + (gate == null ? "absent - every utterance is kept" : "enrolled"));
         return true;
     }
 
     /** Stop listening and release the mic. Safe to call twice. */
     public void stop() {
+        boolean was = running;
         running = false;
         Thread t = thread;
         if (t != null) {
             try { t.join(1500); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         }
         thread = null;
+        if (was) Log.i(TAG, "screen-off listening stopped (" + dropped + " discarded as not-you)");
     }
 
     public boolean isRunning() {
@@ -198,6 +213,8 @@ public final class LockedListener {
         if (!wearer) {
             // Not the wearer: keep nothing. A bystander's voice is not ours to store.
             dropped++;
+            Log.i(TAG, "discarded a voice that failed the print gate: " + seg.voicedMs()
+                    + " ms, score " + String.format(java.util.Locale.US, "%.3f", score));
             try {
                 heard.onUtterance(new Result(null, print, quality, score, false, seg.voicedMs(),
                         null, "not the wearer - discarded"));
@@ -215,6 +232,9 @@ public final class LockedListener {
                 if (old != null && old.exists() && !old.delete()) old.deleteOnExit();
             }
         }
+        Log.i(TAG, "kept " + seg.voicedMs() + " ms of the wearer's speech, score "
+                + String.format(java.util.Locale.US, "%.3f", score) + " -> "
+                + (wav == null ? "NOT written to disk" : wav.getName()));
         try {
             heard.onUtterance(new Result(pcm, print, quality, score, true, seg.voicedMs(), wav,
                     seg.reason().equals("max length") ? "kept: hit the length ceiling" : null));
