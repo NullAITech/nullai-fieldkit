@@ -175,3 +175,32 @@ window proving the recreate really happened. Android typecheck: 0 errors, 66 cla
 Still open, and distinct from this bug: with no glasses paired to a test call the Muse downlink stalls
 after a few frames, and the call's own retry path ("Call dropped") is what the wearer hears when the
 upstream link dies.
+
+## Oct 31 — a push cannot leave this machine with a credential in it
+
+Asked for a test that has to run before anything is pushed and whose job is to stop sensitive
+information reaching the repository. Built as a guard rather than a script that merely exists:
+`tools/prepush-secret-scan.sh` (25 rules over the outgoing range), a self-check that plants
+real-shaped leaks and proves the rules catch them, and `.githooks/pre-push` +
+`tools/install-prepush-hook.sh` to make it mandatory.
+
+Evidence, all rerun on this tree:
+
+* `bash tools/prepush-secret-scan.sh --self-check` → **SELF-CHECK OK, 27 controls, exit 0**. The
+  negative controls matter more than the positive ones: no files readable → **exit 2 CANNOT VERIFY**,
+  so a push that was not actually checked never reports as clean; a deletion-only push and a branch
+  rewound so the leak files leave the tree → exit 0 with the reason printed; an untracked stray secret
+  is not silently imported into a range scan.
+* The guard is armed: `git config --local --get core.hooksPath` reads back `<toplevel>/.githooks`, and
+  `tools/install-prepush-hook.sh --check` reports **ACTIVE**.
+* End-to-end, not just the self-check: a credential planted in a local commit made
+  `git push --dry-run origin main` **REFUSED, exit 1** (`content  tools/...env:1  github-token  <masked> (40 chars)`),
+  and the report prints rule, file, line and a masked prefix + length — never the value. The probe
+  commit was then reset away and the file is absent from the tree.
+* Two defects the self-check found, and the fixes: the planted `secrets-file` control never fired
+  because the fixture's file was named `notes/api.txt` and the rule matches secret(s)/token(s) with a
+  txt/json/yaml/xml suffix — the fixture was wrong, not the rule; and the scanner's own source tripped
+  its own rules because the self-check embedded the planted credentials as literals. Every planted
+  value is now assembled at run time from inert fragments, and the final control runs `--all` over this
+  very repository, so the file has to pass its own guard.
+* Bypass is `git push --no-verify` — git's own escape hatch, deliberate rather than accidental.

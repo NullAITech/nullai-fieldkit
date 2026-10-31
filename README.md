@@ -117,6 +117,15 @@ being connected: live stream to X and the final demo film.
 
 Repository history in this public repo is curated on purpose: the first commit is a frozen snapshot of what existed before the hackathon, tagged `baseline/pre-event-2026-10-26`; later commits show only the new FieldKit work, in order. That split is machine-checkable rather than a promise — `git diff baseline/pre-event-2026-10-26..main` lists exactly what the hackathon added. Internal provenance for the original working copy (which is not public) is preserved separately by NullAI.
 
+Nothing leaves this machine unguarded. `tools/prepush-secret-scan.sh` scans exactly the range a
+`git push` is about to publish — 25 rules covering provider tokens, private-key blocks, device pref
+dumps, `.env` files and build artifacts — and `.githooks/pre-push` runs it before a single object is
+transferred, so a credential aborts the push. The scanner is proved by its own controls rather than by
+assertion: `--self-check` plants real-shaped leaks and requires every rule to fire, requires clean and
+placeholder files to pass, and treats "no files could be read" as a refusal (exit 2) instead of a clean
+result. A fresh clone arms it once with `tools/install-prepush-hook.sh`; `--check` reports whether this
+clone is guarded.
+
 
 ## Timeline — how this was built
 

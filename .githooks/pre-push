@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Mandatory pre-push secret guard.
+#
+# Installed by tools/install-prepush-hook.sh, which points this clone's
+# core.hooksPath at this directory so git runs it on every `git push` before a
+# single object leaves the machine.  It scans exactly the range that is being
+# pushed and refuses the push when it finds a credential, a private key, a
+# device pref dump or a build artifact.
+#
+# It is not bypassable from inside the repository: the only way past it is an
+# explicit `git push --no-verify`, which git itself offers to any user and
+# which should be a deliberate, reviewed decision.
+#
+# The scanner reads the ref list from stdin, and git feeds that list to this
+# hook on stdin -- so nothing here may consume stdin first.
+set -u
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "pre-push: REFUSED - not inside a git working tree; cannot scan." >&2
+  exit 1
+}
+
+scan="$root/tools/prepush-secret-scan.sh"
+
+if [ ! -f "$scan" ]; then
+  echo "pre-push: REFUSED - $scan is missing, so this push cannot be checked." >&2
+  echo "          restore it (git checkout -- tools/prepush-secret-scan.sh) before pushing." >&2
+  echo "          To push anyway, do it deliberately: git push --no-verify" >&2
+  exit 1
+fi
+
+if ! command -v bash >/dev/null 2>&1; then
+  echo "pre-push: REFUSED - bash is not available to run the secret scan." >&2
+  exit 1
+fi
+
+# exec: the scanner's exit code (1 = finding, 2 = could not verify) aborts the
+# push.  Both are refusals -- an unverifiable push is not a safe push.
+exec bash "$scan" --repo "$root" --hook
