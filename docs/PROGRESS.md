@@ -136,3 +136,42 @@ where the old build reported devMode=false and no registered dev session.
 
 Pending, and it needs the wearer: unfold the glasses, tap *Connect glasses*, and read the session
 verdict from logcat (approve the Meta AI card if one appears).
+
+## Oct 31 - the call survives the home screen (and stops reopening itself)
+
+Symptom, in the wearer's words: the glasses connected, the app worked, then the voice call went
+buggy, the UI jumped, and the relay session was gone.
+
+Three defects chained, each read out of the source and then reproduced on the device
+(`59230DLCH003XU`):
+
+1. **The live call shared `MainActivity`'s task.** `MainActivity` is `singleTask`; when anything
+   brings it forward mid-call (the glasses notification, a recognizer returning its result) every
+   activity above it is cleared - `CallActivity` included - and its `onDestroy()` hangs up. Call and
+   relay session both died mid-sentence. `CallActivity` now declares its own task (`taskAffinity` +
+   `launchMode=singleInstance`), `CallActivity.LIVE` marks the call that owns the microphone, and the
+   home screen's `listen()` refuses to open the recognizer over a live call (that screen was the
+   trigger for the teardown).
+2. **The `open_call` deep link replayed itself.** `getIntent().removeExtra()` clears only the app's
+   parceled copy; the system keeps its own copy of the activity's base intent, so every recreate
+   re-entered the call unprompted. Reproduced deterministically: `cmd uimode night` with MainActivity
+   resumed produced a second `START ... .CallActivity (has extras) ... from uid 10424 (sr=MainActivity)`
+   - the app opening a call on its own. Now consumed once per process.
+3. **Nothing refused a second call while one was up.** `startCall()` returns while `CallActivity.LIVE`,
+   and `onNewIntent` ignores a late open, so a live session cannot be restarted from under the wearer.
+
+Also: the REST mission path now asks the relay which providers it can serve (`/v1/providers`,
+`configured=['local']` on this relay) instead of hardcoding `"wonder"`, whose key is not configured
+here; that 503 reads to the wearer as the relay going away. The WS path already healed itself this way,
+and the relay's own error text is shown instead of a bare code.
+
+Verified on the device after the fix (APK built `--max-workers=4`, versionCode left at 12): a cold
+`--ez open_call true` puts the call in its own task (`A=10424:tech.nullai.fieldkit.call`) with
+`CallStats` climbing; bringing MainActivity to the front no longer tears it down (`up 326 -> 534`, task
+intact, no `hangUp`, no `onDestroy`); and the same `cmd uimode night` recreate that used to re-open the
+call now produces **no second `START`**, with `finishDrawing of relaunch: ...MainActivity` in the same
+window proving the recreate really happened. Android typecheck: 0 errors, 66 classes. Commit `bc3dda7`.
+
+Still open, and distinct from this bug: with no glasses paired to a test call the Muse downlink stalls
+after a few frames, and the call's own retry path ("Call dropped") is what the wearer hears when the
+upstream link dies.
