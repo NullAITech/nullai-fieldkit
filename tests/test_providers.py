@@ -123,3 +123,15 @@ async def test_upstream_error_is_error_event_not_exception():
     p = OpenAICompatProvider("spark", "https://api.meta.ai/v1", "muse-spark-1.1")
     ev = await collect(p.stream_events(Turn(prompt="hi"), "r4", openai_mock(seen, status=500)))
     assert ev[-1]["type"] == "error" and ev[-1]["status"] == 502
+
+
+def test_configured_providers_lists_only_keyed(monkeypatch):
+    from zoth_relay.providers import configured_providers, presets_public
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.setenv("ZOTH_LOCAL_MODEL", "tiny")
+    names = configured_providers()
+    assert "spark" not in names          # no META_API_KEY -> cannot serve
+    assert "local" in names              # keyless Ollama endpoint
+    pub = presets_public()
+    assert any(p["name"] == "spark" and p["configured"] is False for p in pub)
+    assert "META_API_KEY" not in json.dumps(pub) and "api_key" not in json.dumps(pub)

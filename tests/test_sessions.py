@@ -183,3 +183,14 @@ async def test_barge_cancels_active_turn():
     kinds = [e["type"] for e in sent]
     assert "stop" in kinds and "done" not in kinds
     assert "".join(e.get("text", "") for e in sent if e["type"] == "delta") == "first "
+
+
+def test_unconfigured_provider_error_names_available(env):
+    """The not-configured error must carry what the client needs to recover."""
+    with env["c"].websocket_connect("/v1/sessions", headers=H(MOB)) as ws:
+        ws.send_json({"type": "hello", "provider": "nokey"})
+        ev = ws.receive_json()
+        assert ev["type"] == "error" and "not configured" in ev["detail"]
+        assert ev["provider"] == "nokey"
+        assert "MISSING_KEY" in ev["missing_env"]   # fixture key env: DEFINITELY_MISSING_KEY
+        assert isinstance(ev["available"], list)

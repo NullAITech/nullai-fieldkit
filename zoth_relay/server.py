@@ -16,7 +16,7 @@ from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
 from . import jot_bridge, recap, second_brain
 from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_interview
-from .providers import provider_presets
+from .providers import configured_providers, presets_public, provider_presets
 from .sessions import ACTIVE_SESSIONS, FRAMES, Session
 from .trio import Advisor, Director, Eyes
 from .live import LiveError, mint_token
@@ -433,6 +433,20 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             ps = app.state.session_providers = provider_presets()
         return ps
 
+    @app.get("/v1/providers", operation_id="listProviders")
+    async def list_providers(agent: Agent = Depends(auth)):
+        """Which vision presets this relay can serve right now.
+
+        Unconfigured presets stay listed with configured=false (key-free) so a
+        client can pick a working one instead of dead-ending on an error.
+        """
+        ps = fieldkit_providers()
+        pubs = presets_public(ps)
+        for p in pubs:                       # name of the env var to set, never its value
+            if not p.get("configured"):
+                p["missing_env"] = ps[p["name"]].api_key_env
+        return {"providers": pubs, "configured": configured_providers(ps)}
+
     @app.post("/v1/missions", operation_id="createMission")
     async def create_mission(request: Request, body: MissionCreate, agent: Agent = Depends(auth)):
         ip = client_ip(request)
@@ -442,7 +456,9 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         if provider is None:
             raise HTTPException(404, f"unknown provider '{name}'")
         if not provider.configured:
-            raise HTTPException(503, f"provider '{name}' is not configured on this relay")
+            raise HTTPException(503, f"provider '{name}' is not configured on this relay"
+                                f"{' (missing ' + provider.api_key_env + ')' if provider.api_key_env else ''}"
+                                f"; configured here: {', '.join(configured_providers(fieldkit_providers())) or 'none'}")
         # Prior-job memory recall (Second Brain + Jot): last time's field
         # notes inform this plan. Best effort; recall never blocks planning.
         try:
@@ -636,8 +652,13 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             await ws.close(code=1000)
             return
         if not provider.configured:
+            # Same detail string, plus the two facts a client needs to recover:
+            # which env var is missing and which presets DO work here.
             await ws.send_json({"type": "error",
-                                "detail": f"provider '{name}' is not configured on this relay"})
+                                "detail": f"provider '{name}' is not configured on this relay",
+                                "provider": name,
+                                "missing_env": provider.api_key_env,
+                                "available": configured_providers(providers)})
             await ws.close(code=1000)
             return
         sess = Session(provider, ws.send_json, getattr(app.state, "session_transport", None),

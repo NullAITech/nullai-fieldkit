@@ -36,6 +36,7 @@ import android.os.Looper;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
+import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
@@ -156,7 +157,9 @@ public class MainActivity extends Activity {
 
     private CameraDevice camera;
     private CameraCaptureSession captureSession;
-    private ImageReader reader;
+    private ImageReader reader;      // JPEG stream frames, encoded by the camera
+    private ImageReader analysis;    // small YUV frames: QR scan + framing hint
+    private Size jpegSize;
     private HandlerThread camThread;
     private Handler camHandler;
     private long lastFrameAt = 0;
@@ -166,10 +169,14 @@ public class MainActivity extends Activity {
     // ---- screen-off session: the foreground service owns the relay + camera link
     private volatile boolean headless = false;   // capturing frames with no preview surface
     private boolean autoReconnect = false;       // stays true until the user disconnects
+    private String providerName = "spark";   // relay preset: spark|wonder|local
     private boolean pendingRegistration = false; // DAT registration launched, awaiting approval
     private boolean registrationWaitLogged = false;
     private int reconnectAttempts = 0;
     private long framesSent = 0;
+    /** Frames thrown away because the socket was behind: the anti-lag valve. */
+    private long framesDropped = 0;
+    private static final long MAX_SOCKET_QUEUE_BYTES = 400_000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -269,50 +276,61 @@ public class MainActivity extends Activity {
         SharedPreferences p = getSharedPreferences("fieldkit", MODE_PRIVATE);
         etRelay.setText(p.getString("relay", "http://192.168.1.20:8766"));
         etToken.setText(p.getString("token", ""));
+        providerName = p.getString("provider", providerName);
 
         tts = new TextToSpeech(this, s -> {
             if (s == TextToSpeech.SUCCESS) tts.setLanguage(Locale.US);
         });
 
         DatGlasses.INSTANCE.init(this);
+        tvStream = findViewById(R.id.tvStream);
+        frameRelay = new FrameRelay(this::relayFrame, this::streamStats);
+        findViewById(R.id.btnCall).setOnClickListener(v -> startCall());
+        // Deep link used by the demo script and by headless verification:
+        // adb shell am start -n tech.nullai.fieldkit/.MainActivity --ez open_call true
+        if (getIntent() != null && getIntent().getBooleanExtra("open_call", false)) {
+            getIntent().removeExtra("open_call");
+            pendingAutoCall = true;
+        }
+        if (getIntent() != null && getIntent().getBooleanExtra("auto_connect", false)) {
+            getIntent().removeExtra("auto_connect");
+            pendingAutoConnect = true;
+        }
+
         DatGlasses.INSTANCE.attachActivity(this);
         DatGlasses.INSTANCE.handleIntent(getIntent());
         DatGlasses.INSTANCE.setListener(new DatGlasses.Listener() {
             @Override public void onStatus(String text) { status(text); }
 
             @Override public void onJpeg(byte[] jpeg) {
-                Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
-                if (bmp != null) {
-                    runOnUiThread(() -> {
-                        ivGlasses.setImageBitmap(bmp);
-                        ivGlasses.setVisibility(android.view.View.VISIBLE);
-                        tvGlasses.setVisibility(android.view.View.GONE);
-                        if (!glassesStreamingShown) {
-                            glassesStreamingShown = true;
-                            status("Glasses streaming — frames are flowing.");
-                        }
+                long captureAt = System.currentTimeMillis();
+                // The old path decoded the full 1280x720 frame on the UI thread
+                // and then gated sending at 450 ms, so the relay always showed a
+                // half-second-old picture and the screen stuttered with it.
+                // Decode a half-size copy on a private worker, and only while
+                // there is a preview to paint: the relay gets every frame.
+                if (!headless && captureAt - lastGlassesPaintAt >= 100) {
+                    lastGlassesPaintAt = captureAt;
+                    previewDecode.execute(() -> {
+                        BitmapFactory.Options o = new BitmapFactory.Options();
+                        o.inSampleSize = 2;
+                        Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
+                        if (bmp == null) return;
+                        runOnUiThread(() -> {
+                            ivGlasses.setImageBitmap(bmp);
+                            ivGlasses.setVisibility(android.view.View.VISIBLE);
+                            tvGlasses.setVisibility(android.view.View.GONE);
+                            if (!glassesStreamingShown) {
+                                glassesStreamingShown = true;
+                                status("Glasses streaming — frames are flowing.");
+                            }
+                        });
                     });
                 }
-                long now = System.currentTimeMillis();
-                if (now - lastRelayGlassesSentAt < 450) return;
-                lastRelayGlassesSentAt = now;
-                try {
-                    JSONObject msg = new JSONObject();
-                    msg.put("type", "frame");
-                    msg.put("source", "glasses");
-                    msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
-                    if (connected) {
-                        sendWs(msg);
-                    } else {
-                        // Glasses frames decode fine locally but the relay never
-                        // saw them — hold the newest and flush on connect.
-                        pendingGlassesFrame = jpeg;
-                        if (!frameHoldNoted) {
-                            frameHoldNoted = true;
-                            status("Glasses streaming live on phone — tap Connect to forward to relay.");
-                        }
-                    }
-                } catch (Exception ignored) { }
+                if (frameRelay != null) {
+                    frameRelay.submit("glasses", jpeg, DatGlasses.INSTANCE.lastFrameWidth(),
+                            DatGlasses.INSTANCE.lastFrameHeight(), captureAt);
+                }
             }
         });
 
@@ -419,7 +437,8 @@ public class MainActivity extends Activity {
 
     private void savePrefs() {
         getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
-                .putString("relay", relayBase()).putString("token", token()).apply();
+                .putString("relay", relayBase()).putString("token", token())
+                .putString("provider", providerName).apply();
     }
 
     private String relayBase() {
@@ -470,21 +489,19 @@ public class MainActivity extends Activity {
                 try {
                     JSONObject hello = new JSONObject();
                     hello.put("type", "hello");
-                    hello.put("provider", "spark");
+                    hello.put("provider", providerName);
+                    Log.i("RelayProvider", "hello preset=" + providerName);
                     hello.put("source", glassesMode ? "glasses" : "phone");
                     hello.put("guide", true);
                     hello.put("preset", PRESETS[presetIdx][0]);
                     if (!missionId.isEmpty()) hello.put("mission_id", missionId);
                     webSocket.send(hello.toString());
-                    if (pendingGlassesFrame != null) {
-                        JSONObject held = new JSONObject();
-                        held.put("type", "frame");
-                        held.put("source", "glasses");
-                        held.put("image", Base64.encodeToString(pendingGlassesFrame, Base64.NO_WRAP));
-                        webSocket.send(held.toString());
-                        pendingGlassesFrame = null;
-                        frameHoldNoted = false;
-                    }
+                    pendingGlassesFrame = null;
+                    frameHoldNoted = false;
+                    // Whatever was captured while the socket was down sits in the
+                    // relay's newest-frame slot — flush that instead of sending a
+                    // stale still and then waiting for the next tick.
+                    if (frameRelay != null) frameRelay.flush();
                 } catch (Exception ignored) { }
                 status("Connected. Say a goal, then tap Start mission.");
             }
@@ -510,6 +527,23 @@ public class MainActivity extends Activity {
                         runOnUiThread(() -> tvStep.setText(label));
                     } else if ("error".equals(type)) {
                         status("Relay: " + ev.optString("detail"));
+                        Log.w("RelayProvider", "hello refused: " + ev.optString("detail")
+                                + " missing_env=" + ev.optString("missing_env", "-")
+                                + " available=" + ev.optJSONArray("available"));
+                        // A relay with no META_API_KEY cannot serve 'spark'; the error
+                        // now names the presets it CAN serve, so switch to one and let the
+                        // automatic reconnect bring the session up instead of dead-ending.
+                        JSONArray avail = ev.optJSONArray("available");
+                        if (avail != null && avail.length() > 0
+                                && !avail.optString(0).equals(providerName)) {
+                            providerName = avail.optString(0);
+                            getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
+                                    .putString("provider", providerName).apply();
+                            Log.i("RelayProvider", "switching preset " + ev.optString("provider", "?")
+                                + " -> " + providerName + " (available=" + avail + ")");
+                        status("Relay cannot serve '" + ev.optString("provider", "?") + "' — switching to '"
+                                    + providerName + "'.");
+                        }
                     } else if ("ready".equals(type)) {
                         status("Session ready (" + ev.optString("model") + ").");
                     }
@@ -1187,8 +1221,11 @@ public class MainActivity extends Activity {
                 camThread.start();
                 camHandler = new Handler(camThread.getLooper());
             }
-            reader = ImageReader.newInstance(640, 480, ImageFormat.YUV_420_888, 2);
-            reader.setOnImageAvailableListener(r -> {
+            // 720p with three buffers: 640x480 is what made the phone look soft
+            // beside the glasses, and two buffers stall the producer whenever the
+            // JPEG encoder is busy.
+            analysis = ImageReader.newInstance(1280, 720, ImageFormat.YUV_420_888, 2);
+            analysis.setOnImageAvailableListener(r -> {
                 Image img = r.acquireLatestImage();
                 if (img == null) return;
                 try {
@@ -1207,22 +1244,32 @@ public class MainActivity extends Activity {
                         float[] d = centreCrop(img);
                         if (d != null) cropDesc = d;
                     }
-                    if (connected && !glassesMode && now - lastFrameAt >= 1500) {
-                        lastFrameAt = now;
-                        byte[] jpeg = yuvToJpeg(img);
-                        if (jpeg != null) {
-                            JSONObject msg = new JSONObject();
-                            msg.put("type", "frame");
-                            msg.put("source", "phone");
-                            msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
-                            sendWs(msg);
-                            framesSent++;
-                            if (headless && framesSent % 20 == 0) {
-                                SpotterService.update(MainActivity.this,
-                                        "Observing with the screen off — " + framesSent + " frames relayed.");
-                            }
-                        }
-                    }
+                    // Streaming is not done from these frames any more: the
+                    // camera's own JPEG encoder feeds FrameRelay, and this
+                    // reader only scans QR codes and measures the framing.
+                } catch (Exception ignored) {
+                } finally {
+                    img.close();
+                }
+            }, camHandler);
+            // The streaming surface is a JPEG ImageReader: the camera encodes
+            // the frame in hardware, so capture never waits on a software
+            // YUV->JPEG pass (that cost ~150 ms per frame and capped the phone
+            // stream at 4 fps). Every frame is offered to FrameRelay; its
+            // single newest-frame slot decides what actually goes out.
+            jpegSize = chooseStreamSize(map == null ? null : map.getOutputSizes(ImageFormat.JPEG));
+            Log.i("StreamStats", "phone stream " + jpegSize.getWidth() + "x" + jpegSize.getHeight()
+                    + " · jpeg off the camera");
+            reader = ImageReader.newInstance(jpegSize.getWidth(), jpegSize.getHeight(), ImageFormat.JPEG, 3);
+            reader.setOnImageAvailableListener(r -> {
+                Image img = r.acquireLatestImage();
+                if (img == null) return;
+                try {
+                    if (!connected || glassesMode || frameRelay == null) return;
+                    java.nio.ByteBuffer buf = img.getPlanes()[0].getBuffer();
+                    byte[] jpeg = new byte[buf.remaining()];
+                    buf.get(jpeg);
+                    frameRelay.submit("phone", jpeg, img.getWidth(), img.getHeight(), System.currentTimeMillis());
                 } catch (Exception ignored) {
                 } finally {
                     img.close();
@@ -1250,6 +1297,87 @@ public class MainActivity extends Activity {
             cameraOpening = false;
             status("Camera unavailable: " + e.getClass().getSimpleName());
         }
+    }
+
+    /** A locked frame rate is what keeps motion crisp: [30,30] when the sensor offers it. */
+    private android.util.Range<Integer> fpsRange() {
+        android.util.Range<Integer> best = new android.util.Range<>(15, 30);
+        try {
+            CameraManager mgr = (CameraManager) getSystemService(CAMERA_SERVICE);
+            String id = backCameraId(mgr);
+            if (id == null) return best;
+            android.util.Range<Integer>[] ranges = mgr.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+            if (ranges == null) return best;
+            for (android.util.Range<Integer> r : ranges) {
+                if (r.getLower() != null && r.getUpper() != null
+                        && r.getLower() == 30 && r.getUpper() == 30) return r;
+            }
+            for (android.util.Range<Integer> r : ranges) {
+                if (r.getUpper() != null && r.getUpper() == 30 && r.getLower() != null && r.getLower() >= 15) best = r;
+            }
+        } catch (Exception ignored) { }
+        return best;
+    }
+
+    private String backCameraId(CameraManager mgr) {
+        try {
+            for (String id : mgr.getCameraIdList()) {
+                Integer facing = mgr.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);
+                if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) return id;
+            }
+            return mgr.getCameraIdList()[0];
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Rotation that makes an encoded frame upright on this display. */
+    private int jpegOrientation() {
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        int degrees = rotation == Surface.ROTATION_90 ? 90 : rotation == Surface.ROTATION_180 ? 180
+                : rotation == Surface.ROTATION_270 ? 270 : 0;
+        try {
+            CameraManager mgr = (CameraManager) getSystemService(CAMERA_SERVICE);
+            String id = backCameraId(mgr);
+            if (id == null) return degrees;
+            Integer sensor = mgr.getCameraCharacteristics(id).get(CameraCharacteristics.SENSOR_ORIENTATION);
+            if (sensor == null) return degrees;
+            return (sensor - degrees + 360) % 360;
+        } catch (Exception ignored) {
+            return degrees;
+        }
+    }
+
+    /**
+     * The streaming JPEG size: 1080p when the sensor lists it, else 720p.
+     *
+     * <p>Measured on the Pixel 10 Pro, the unfiltered JPEG list hands back
+     * 4032x3024 — 12 MP, ~290 KB a frame, 7.4 MB/s at 25 fps. That is quality
+     * nothing downstream needs and bandwidth every stage has to carry, so the
+     * stream is capped at 1080p: still crisp, a sixth of the pixels.
+     */
+    private Size chooseStreamSize(Size[] choices) {
+        Size fallback = new Size(1280, 720);
+        if (choices == null || choices.length == 0) return fallback;
+        for (Size s : choices) {
+            if (s.getWidth() == 1920 && s.getHeight() == 1080) return s;
+        }
+        for (Size s : choices) {
+            if (s.getWidth() == 1280 && s.getHeight() == 720) return s;
+        }
+        Size best = null;
+        long bestArea = 0;
+        for (Size s : choices) {
+            long area = (long) s.getWidth() * s.getHeight();
+            double ratio = s.getWidth() / (double) Math.max(1, s.getHeight());
+            if (area > 1920L * 1080L || Math.abs(ratio - 16.0 / 9.0) > 0.05) continue;
+            if (area > bestArea) {
+                bestArea = area;
+                best = s;
+            }
+        }
+        return best != null ? best : fallback;
     }
 
     private Size choosePreviewSize(Size[] choices) {
@@ -1313,6 +1441,7 @@ public class MainActivity extends Activity {
             List<Surface> targets = new ArrayList<>();
             if (previewTarget != null) targets.add(previewTarget);
             targets.add(reader.getSurface());
+            if (analysis != null) targets.add(analysis.getSurface());
             final boolean readerOnly = previewTarget == null;
             camera.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
                 @Override public void onConfigured(CameraCaptureSession session) {
@@ -1321,11 +1450,12 @@ public class MainActivity extends Activity {
                         CaptureRequest.Builder b = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                         if (previewTarget != null) b.addTarget(previewTarget);
                         b.addTarget(reader.getSurface());
-                        if (readerOnly) {
-                            // Screen-off capture: match the JPEG writer's exposure needs
-                            // without a preview surface to drive AE.
-                            b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new android.util.Range<>(15, 30));
-                        }
+                        if (analysis != null) b.addTarget(analysis.getSurface());
+                        b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange());
+                        // Streamed frames are JPEG straight off the camera: q90
+                        // is the quality the relay forwards, so ask for it here.
+                        b.set(CaptureRequest.JPEG_QUALITY, (byte) 90);
+                        b.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation());
                         b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
                         b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
                         session.setRepeatingRequest(b.build(), null, camHandler);
@@ -1348,11 +1478,13 @@ public class MainActivity extends Activity {
             if (captureSession != null) captureSession.close();
             if (camera != null) camera.close();
             if (reader != null) reader.close();
+            if (analysis != null) analysis.close();
             if (camThread != null) camThread.quitSafely();
         } catch (Exception ignored) { }
         captureSession = null;
         camera = null;
         reader = null;
+        analysis = null;
         camThread = null;
         camHandler = null;
     }
@@ -1360,31 +1492,121 @@ public class MainActivity extends Activity {
     private byte[] yuvToJpeg(Image img) {
         try {
             Image.Plane[] planes = img.getPlanes();
-            ByteBuffer y = planes[0].getBuffer(), u = planes[1].getBuffer(), v = planes[2].getBuffer();
-            int total = y.remaining() + u.remaining() + v.remaining();
-            byte[] nv21 = new byte[total];
+            int w = img.getWidth(), h = img.getHeight();
+            byte[] nv21 = new byte[w * h * 3 / 2];
+            // Y plane, copied row by row: the capture row stride is normally
+            // wider than the image, and reading it as one flat block (as this
+            // used to) shears the picture.
+            ByteBuffer y = planes[0].getBuffer();
+            int yRow = planes[0].getRowStride();
             int pos = 0;
-            pos += copy(y, nv21, pos);
-            byte[] ub = new byte[u.remaining()], vb = new byte[v.remaining()];
-            u.get(ub); v.get(vb);
-            int uvCount = Math.min(ub.length, vb.length);
-            for (int i = 0; i < uvCount; i++) {
-                nv21[pos++] = vb[i];
-                nv21[pos++] = ub[i];
+            if (yRow == w) {
+                y.get(nv21, 0, w * h);
+                pos = w * h;
+            } else {
+                byte[] row = new byte[yRow];
+                for (int r = 0; r < h; r++) {
+                    y.position(r * yRow);
+                    int n = Math.min(yRow, y.remaining());
+                    if (n <= 0) break;
+                    y.get(row, 0, n);
+                    System.arraycopy(row, 0, nv21, pos, w);
+                    pos += w;
+                }
             }
-            YuvImage yuv = new YuvImage(nv21, ImageFormat.NV21, img.getWidth(), img.getHeight(), null);
+            // Chroma, interleaved V-then-U (NV21) honouring the chroma strides.
+            ByteBuffer u = planes[1].getBuffer(), v = planes[2].getBuffer();
+            int uvRow = planes[1].getRowStride();
+            int uvPix = planes[1].getPixelStride();
+            int cw = w / 2, ch = h / 2;
+            for (int r = 0; r < ch; r++) {
+                for (int c = 0; c < cw; c++) {
+                    int idx = r * uvRow + c * uvPix;
+                    if (idx + 1 > v.limit() || idx + 1 > u.limit() || pos + 1 >= nv21.length) break;
+                    nv21[pos++] = v.get(idx);
+                    nv21[pos++] = u.get(idx);
+                }
+            }
+            YuvImage yuv = new YuvImage(nv21, ImageFormat.NV21, w, h, null);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            yuv.compressToJpeg(new Rect(0, 0, img.getWidth(), img.getHeight()), 70, out);
+            // 85 to match the glasses encode: q70 was visibly softer.
+            yuv.compressToJpeg(new Rect(0, 0, w, h), 85, out);
             return out.toByteArray();
         } catch (Exception e) {
             return null;
         }
     }
 
-    private int copy(ByteBuffer src, byte[] dst, int pos) {
-        int n = src.remaining();
-        src.get(dst, pos, n);
-        return n;
+    // ------------------------------------------------- zero-lag stream plumbing
+    private FrameRelay frameRelay;
+    private TextView tvStream;
+    private long lastGlassesPaintAt = 0L;
+    /** Set by --ez open_call true: the demo can open the call without a tap. */
+    private boolean pendingAutoCall;
+    /** Set by --ez auto_connect true: bring the relay session up without a tap. */
+    private boolean pendingAutoConnect;
+    /** Preview decode runs here so the UI thread never waits on a JPEG. */
+    private final java.util.concurrent.ExecutorService previewDecode =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "preview-decode");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** FrameRelay sink: hand one newest frame to the relay socket. */
+    private boolean relayFrame(String source, byte[] jpeg, int width, int height) {
+        if (!connected || ws == null) {
+            if (!frameHoldNoted) {
+                frameHoldNoted = true;
+                runOnUiThread(() -> status(
+                        "Frames are flowing on the phone — tap Connect to forward them to the relay."));
+            }
+            return false;
+        }
+        try {
+            JSONObject msg = new JSONObject();
+            msg.put("type", "frame");
+            msg.put("source", source);
+            if (width > 0 && height > 0) {
+                msg.put("w", width);
+                msg.put("h", height);
+            }
+            msg.put("image", Base64.encodeToString(jpeg, Base64.NO_WRAP));
+            // A socket that is already behind is lag you can never catch up on:
+            // drop this frame and let the next newest one go out instead of
+            // queueing. FrameRelay offers the freshest frame, so nothing stutters.
+            if (ws.queueSize() > MAX_SOCKET_QUEUE_BYTES) {
+                framesDropped++;
+                return true;   // consumed: the slot is free for a newer frame
+            }
+            ws.send(msg.toString());
+            framesSent++;
+            final long n = framesSent;
+            if (headless && n % 20 == 0) {
+                SpotterService.update(this,
+                        "Observing with the screen off — " + n + " frames relayed.");
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** FrameRelay stats: shows the measured rate and pipeline cost on screen. */
+    private void streamStats(final String text) {
+        if (tvStream != null) tvStream.setText(text);
+        // Mirrored to logcat (adb logcat -s StreamStats:I) so stream quality and
+        // pipeline cost can be read without the screen.
+        Log.i("StreamStats", text);
+    }
+
+    /** Open the full-duplex Muse call. The mic stays open until the wearer hangs up. */
+    private void startCall() {
+        Intent i = new Intent(this, CallActivity.class);
+        i.putExtra(CallActivity.EXTRA_RELAY, etRelay.getText().toString().trim());
+        i.putExtra(CallActivity.EXTRA_TOKEN, etToken.getText().toString().trim());
+        if (glassesMode) i.putExtra(CallActivity.EXTRA_ON_GLASSES, true);
+        startActivity(i);
     }
 
     // ------------------------------------------------------------- camera source + QR pairing
@@ -1419,7 +1641,7 @@ public class MainActivity extends Activity {
             try {
                 JSONObject hello = new JSONObject();
                 hello.put("type", "hello");
-                hello.put("provider", "spark");
+                hello.put("provider", providerName);
                 hello.put("source", glasses ? "glasses" : "phone");
                 hello.put("guide", true);
                 hello.put("preset", PRESETS[presetIdx][0]);
@@ -1514,6 +1736,14 @@ public class MainActivity extends Activity {
         // One microphone, and the screen-on path gets it: the service stops reading while
         // the app is in front so the Talk button's one-shot capture can open the device.
         SpotterService.setListening(this, false);
+        if (pendingAutoConnect) {
+            pendingAutoConnect = false;
+            findViewById(R.id.btnConnect).post(this::connectToggle);
+        }
+        if (pendingAutoCall) {
+            pendingAutoCall = false;
+            findViewById(R.id.btnCall).post(this::startCall);
+        }
         String heardOff = SpotterService.lastHeard();
         if (!heardOff.isEmpty()) status("While the screen was off: " + heardOff);
         // The screen-off loop keeps the wearer's own utterances as WAVs and deliberately does not

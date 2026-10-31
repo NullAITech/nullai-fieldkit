@@ -241,3 +241,20 @@ def provider_presets() -> dict[str, Provider]:
             "ZOTH_LOCAL_BASE", "http://127.0.0.1:11434/v1"),
             os.environ.get("ZOTH_LOCAL_MODEL", "tiny")),
     }
+
+
+def configured_providers(presets: dict[str, Provider] | None = None) -> list[str]:
+    """Preset names that can serve a turn right now (key present, endpoint set).
+
+    Kick: a client that asks for an unconfigured preset (spark before
+    META_API_KEY lands) must be told which preset *will* work, so the app can
+    switch and keep running instead of showing a dead-end error string.
+    """
+    ps = presets if presets is not None else provider_presets()
+    return sorted(n for n, p in ps.items() if p.configured and p.base_url)
+
+
+def presets_public(presets: dict[str, Provider] | None = None) -> list[dict]:
+    """Public, key-free view of every preset (configured and not)."""
+    ps = presets if presets is not None else provider_presets()
+    return [ps[n].public() for n in sorted(ps)]

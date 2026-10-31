@@ -45,6 +45,14 @@
             android:stopWithTask="false"
             android:foregroundServiceType="camera|microphone|connectedDevice|dataSync" />
 
+        <!-- Full-duplex Muse call: Gemini Live over a relay-minted token.
+             RECORD_AUDIO keeps the wearer's mic open until they hang up. -->
+        <activity
+            android:name=".CallActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

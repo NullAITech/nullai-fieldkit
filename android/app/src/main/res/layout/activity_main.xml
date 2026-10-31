@@ -172,6 +172,19 @@
                 android:textColor="#333333"
                 android:textSize="14sp"
                 android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvStream"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_margin="8dp"
+                android:background="@drawable/bg_pill"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="4dp"
+                android:text="Stream idle"
+                android:textColor="#111111"
+                android:textSize="10sp" />
         </FrameLayout>
 
         <LinearLayout
@@ -346,6 +359,16 @@
                 android:text="&#9678; Voice"
                 android:textColor="#111111"
                 android:background="@drawable/bg_btn_light" />
+
+            <Button
+                android:id="@+id/btnCall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:minHeight="48dp"
+                android:background="@drawable/bg_btn_dark"
+                android:text="&#9743; Call"
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnPerson"

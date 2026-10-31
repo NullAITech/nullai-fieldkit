@@ -390,9 +390,13 @@ object DatGlasses {
                     return@launch
                 }
 
-                // 15 fps is officially supported in VideoFormat.SUPPPORTED_FRAME_RATES = [30, 24, 15, 7, 2]
+                // 30 fps heads VideoFormat.SUPPPORTED_FRAME_RATES = [30, 24, 15, 7, 2]:
+                // still supported, and half the motion judder of 15.
                 val camResult = sess.addCamera(
-                    StreamConfiguration(frameRate = 15, videoQuality = VideoQuality.MEDIUM)
+                    // 24 fps: DAT's supported rates are [30, 24, 15, 7, 2], and this
+                    // phone is also running a live audio call — 24 is smoother than 15
+                    // without the extra decode heat of 30.
+                    StreamConfiguration(frameRate = 24, videoQuality = VideoQuality.HIGH)
                 )
                 val cam = camResult.getOrNull()
                 if (cam == null) {
@@ -437,7 +441,7 @@ object DatGlasses {
                 str.videoStream.collect { frame ->
                     if (!frame.isCodecConfig) {
                         val now = System.currentTimeMillis()
-                        if (now - lastSent >= 120) {
+                        if (now - lastSent >= 33) {
                             val jpeg = toJpeg(frame)
                             if (jpeg != null) {
                                 lastSent = now
@@ -489,10 +493,20 @@ object DatGlasses {
         frameCount = 0
     }
 
+    @Volatile private var lastW = 0
+    @Volatile private var lastH = 0
+
+    /** Size of the most recent frame handed to the listener (for the relay header). */
+    fun lastFrameWidth(): Int = lastW
+
+    fun lastFrameHeight(): Int = lastH
+
     private fun toJpeg(frame: VideoFrame): ByteArray? {
         if (frame.isCompressed) return null
         val width = frame.width
         val height = frame.height
+        lastW = width
+        lastH = height
         if (width <= 0 || height <= 0) return null
         val duplicate = frame.buffer.duplicate()
         duplicate.rewind()
@@ -506,7 +520,7 @@ object DatGlasses {
                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(bytes, 0, rgbaBytes))
                 ByteArrayOutputStream().also {
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 78, it)
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it)
                 }.toByteArray()
             }
 
@@ -525,7 +539,7 @@ object DatGlasses {
                 }
                 val out = ByteArrayOutputStream()
                 val ok = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-                    .compressToJpeg(Rect(0, 0, width, height), 78, out)
+                    .compressToJpeg(Rect(0, 0, width, height), 85, out)
                 if (ok) out.toByteArray() else null
             }
 
@@ -538,7 +552,7 @@ object DatGlasses {
                 }
                 val bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
                 ByteArrayOutputStream().also {
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 78, it)
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it)
                 }.toByteArray()
             }
 

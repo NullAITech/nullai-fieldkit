@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0B0C10"
+    android:fitsSystemWindows="true"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/tvCallState"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_pill"
+        android:padding="10dp"
+        android:textColor="#E8EEF7"
+        android:textSize="14sp"
+        android:text="Opening a live Muse session…" />
+
+    <TextView
+        android:id="@+id/tvCallMeter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/bg_pill"
+        android:padding="8dp"
+        android:fontFamily="monospace"
+        android:textColor="#9FB3C8"
+        android:textSize="11sp"
+        android:text="mic —  ·  session not open" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="10dp">
+
+        <tech.nullai.fieldkit.avatar.Muse2DView
+            android:id="@+id/muse2d"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <tech.nullai.fieldkit.avatar.Muse3DView
+            android:id="@+id/muse3d"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/tvCallLog"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_pill"
+        android:padding="10dp"
+        android:maxLines="5"
+        android:textColor="#C9D6E8"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnMute"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:text="Mic on" />
+
+        <Button
+            android:id="@+id/btnEyes"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:text="Eyes off" />
+
+        <Button
+            android:id="@+id/btnAvatar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:text="3D" />
+
+        <Button
+            android:id="@+id/btnHangUp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#FF9B9B"
+            android:text="Hang up" />
+    </LinearLayout>
+</LinearLayout>

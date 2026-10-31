@@ -5,6 +5,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Optional: META_API_KEY for the spark/wonder presets (chmod 600)
+EnvironmentFile=-%h/.config/zoth-relay/meta.env
 Type=simple
 User=zoth-relay
 Group=zoth-relay

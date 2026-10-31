@@ -9,6 +9,7 @@ Wants=network-online.target
 Type=simple
 Environment=ZOTH_RELAY_CONFIG=%h/.config/zoth-relay/mobile/config.yaml
 Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-%h/.config/zoth-relay/meta.env
 EnvironmentFile=-%h/.config/zoth-relay/mobile/secrets.env
 WorkingDirectory=%h/.local/share/zoth-relay-mobile/app
 ExecStart=%h/.local/share/zoth-relay-mobile/venv/bin/python -m zoth_relay serve
