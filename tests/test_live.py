@@ -18,7 +18,7 @@ def H(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-def make(tmp_path, live=True, status=200, name="auth_tokens/abc123"):
+def make(tmp_path, live=True, status=200, name="auth_tokens/abc123", live_fields=None):
     (tmp_path / "ws").mkdir(exist_ok=True)
     (tmp_path / "agents.yaml").write_text(yaml.safe_dump({"agents": {
         "pixel": {"token_sha256": hash_token(MOB), "profile": "mobile", "allowed_dirs": [str(tmp_path / "ws")]},
@@ -28,6 +28,7 @@ def make(tmp_path, live=True, status=200, name="auth_tokens/abc123"):
                                  "api_key_env": "LIVE_KEY", "extra": {"reasoning_effort": "none", "model": "evil"}}}}
     if live:
         cfg["live"] = {"model": "models/gemini-3.8-live", "api_key_env": "LIVE_KEY", "voice": "Puck"}
+        cfg["live"].update(live_fields or {})
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg))
     seen = []
 
@@ -122,3 +123,32 @@ def test_ask_target_extra_fields_do_not_override_core(tmp_path):
     assert r.status_code == 200
     body = seen[-1]["body"]
     assert body["reasoning_effort"] == "none" and body["model"] == "gemini-2.5-flash"
+
+
+def test_live_output_language_pinned(tmp_path):
+    """The guide must speak the relay's language, not whatever it hears in the room."""
+    guard, seen = make(tmp_path)
+    with TestClient(guard) as c:
+        assert c.post("/v1/live/token", headers=H(MOB)).status_code == 200
+    setup = seen[-1]["body"]["bidiGenerateContentSetup"]
+    assert setup["generationConfig"]["speechConfig"]["languageCode"] == "en-US"
+    assert setup["generationConfig"]["speechConfig"]["voiceConfig"][
+        "prebuiltVoiceConfig"]["voiceName"] == "Puck"
+    assert "Always speak English (en-US)" in setup["systemInstruction"]["parts"][0]["text"]
+
+
+def test_live_language_pin_survives_custom_system_and_can_be_disabled(tmp_path):
+    custom = "You are a scout."
+    guard, seen = make(tmp_path, live_fields={"system": custom})
+    with TestClient(guard) as c:
+        assert c.post("/v1/live/token", headers=H(MOB)).status_code == 200
+    text = seen[-1]["body"]["bidiGenerateContentSetup"]["systemInstruction"]["parts"][0]["text"]
+    assert text.startswith(custom) and "Always speak English (en-US)" in text
+
+    (tmp_path / "off").mkdir()
+    guard, seen = make(tmp_path / "off", live_fields={"language_code": ""})
+    with TestClient(guard) as c:
+        assert c.post("/v1/live/token", headers=H(MOB)).status_code == 200
+    setup = seen[-1]["body"]["bidiGenerateContentSetup"]
+    assert "languageCode" not in setup["generationConfig"]["speechConfig"]
+    assert "Always speak" not in setup["systemInstruction"]["parts"][0]["text"]

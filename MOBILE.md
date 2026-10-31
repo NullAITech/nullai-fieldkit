@@ -89,6 +89,12 @@ locked server-side to the model, AUDIO output, session resumption and the relay'
 Body (optional): `{"mission": "networking at a meetup", "voice": "Puck"}` (mission ≤ 2000 chars is
 baked into the locked system instruction; voice = Gemini prebuilt voice name).
 
+The relay also pins the spoken language: `live.language_code` (default `en-US`) is sent as
+`speechConfig.languageCode` **and** repeated in the locked system instruction, so the guide keeps
+answering in that language even when it hears people, a TV or another call in a different one. Set
+`live.language_code: ""` to give the model free choice again. The voice stays overridable per request
+from the app; both values are locked into the token.
+
 ```json
 {"token":"auth_tokens/…","model":"gemini-3.8-live",
  "expires_at":"2026-10-18T04:38:13Z","new_session_expires_at":"2026-10-18T04:09:13Z","uses":1,

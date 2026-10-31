@@ -17,3 +17,6 @@ live:                       # Gemini Live ephemeral tokens (POST /v1/live/token)
   api_version: v1alpha
   response_modalities: [AUDIO]
   # voice: Puck
+  # output language for the guide's speech (BCP-47). Live models otherwise pick a language from
+  # whatever they hear, so a TV or a bystander can flip the call to Spanish mid-sentence.
+  language_code: en-US             # "" = let the model choose

@@ -25,6 +25,22 @@ DEFAULT_LIVE_SYSTEM = (
 SESSION_START_WINDOW = timedelta(minutes=1)   # Google default newSessionExpireTime
 SESSION_LIFETIME = timedelta(minutes=30)      # Google default expireTime
 
+# The Live models choose their output language from whatever they hear, so a Spanish TV, a
+# bystander or a video playing nearby can flip the guide mid-call. Google's fix is two-sided:
+# speechConfig.languageCode pins the audio and the same instruction in the system prompt keeps
+# the words on side, so the guide always answers in the language the relay picked.
+LANGUAGE_NAMES = {"en": "English", "es": "Spanish", "fr": "French", "de": "German",
+                  "pt": "Portuguese", "it": "Italian", "nl": "Dutch"}
+
+
+def language_directive(code: str) -> str:
+    """One system-instruction line that holds the guide in a single language."""
+    name = LANGUAGE_NAMES.get(code.split("-", 1)[0].lower(), code)
+    label = f"{name} ({code})" if name != code else code
+    return (f"Always speak {label}, and never switch language mid-sentence: even if the wearer, "
+            "the people around them, or audio playing nearby (TV, video, another call) is in a "
+            "different language, keep answering in the same one.")
+
 
 class LiveError(Exception):
     def __init__(self, status: int, detail: str):
@@ -40,6 +56,7 @@ class LiveConfig:
     api_version: str = "v1alpha"
     system: str = ""
     voice: str = ""                 # prebuilt voice name, e.g. "Puck"; empty = model default
+    language_code: str = "en-US"    # BCP-47 output language; "" = let the model choose
     response_modalities: list[str] = field(default_factory=lambda: ["AUDIO"])
     timeout: int = 20
 
@@ -66,16 +83,24 @@ def parse_live(raw: dict | None) -> LiveConfig | None:
         base_url=str(raw.get("base_url", "https://generativelanguage.googleapis.com")).rstrip("/"),
         api_version=str(raw.get("api_version", "v1alpha")),
         system=str(raw.get("system") or ""), voice=str(raw.get("voice") or ""),
+        language_code=str(raw.get("language_code", "en-US") or ""),
         response_modalities=[str(m).upper() for m in (raw.get("response_modalities") or ["AUDIO"])],
         timeout=int(raw.get("timeout", 20)))
 
 
 def build_setup(cfg: LiveConfig, mission: str = "", voice: str = "") -> dict:
     system = (cfg.system or DEFAULT_LIVE_SYSTEM) + (f"\nCurrent mission: {mission}" if mission else "")
+    if cfg.language_code:
+        system += "\n" + language_directive(cfg.language_code)   # custom prompts get the pin too
     gen: dict = {"responseModalities": cfg.response_modalities}
     v = voice or cfg.voice
+    speech: dict = {}
+    if cfg.language_code:
+        speech["languageCode"] = cfg.language_code               # pins the audio language
     if v:
-        gen["speechConfig"] = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": v}}}
+        speech["voiceConfig"] = {"prebuiltVoiceConfig": {"voiceName": v}}
+    if speech:
+        gen["speechConfig"] = speech
     return {"model": f"models/{cfg.model}", "generationConfig": gen, "sessionResumption": {},
             "systemInstruction": {"parts": [{"text": system}]}}
 
