@@ -101,3 +101,38 @@ Stage 1 is pass/fail on theme fit plus actually using Meta models — the repo c
 | Mon Nov 2 | Film the 3-minute demo | Demo 25% |
 | Tue Nov 3 | README/architecture pass, prior-vs-new clarity, X clip | Tooling 25% + $20K viral bonus + protects against a DQ |
 | Wed Nov 4 | Submit by 6:00 PM ET (hard stop 9:00 PM) | — |
+
+---
+
+## Oct 31 - why the glasses said "they need an update" (and the fix)
+
+Symptom: the Ray-Ban Meta gen 1 refused every session with
+`START_ERROR_DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED` while the firmware was reported
+COMPATIBLE, and the app passed that raw error on as "Your glasses need an update" - untrue.
+
+Root cause, read out of the SDK bytecode (`mwdat-core-1.0.1`, Gradle transforms cache) instead
+of guessed: `RegistrationManagerImpl` reads its developer-mode flag from
+`dat_registration/is_dev_mode` **when the SDK object is constructed** (default false), and only
+ever writes that key back from a completed Meta AI registration result. A developer build - one
+with no usable `APPLICATION_ID` in the manifest - must ask for a *dev* session; after a clean
+install (or a reinstall carrying a new versionCode) the key is absent, the SDK asks non-dev, and
+the glasses answer UPDATE_REQUIRED. Upstream reports the same signature
+(facebook/meta-wearables-dat-android discussion #188).
+
+Fix in `DatGlasses.kt`:
+- `ensureDevModeState()` runs before `Wearables.initialize()`: a dev build whose flag is unset
+  persists `dat_registration/is_dev_mode = true`, which is exactly what the SDK reads when it is
+  constructed.
+- `escalateRegistrationOnce()`: if a session is still refused with UPDATE_REQUIRED and Meta AI
+  never recorded a registration on this install, it hands the approval card to Meta AI once
+  (main-thread `register(activity)`) instead of repeating the firmware story.
+- The status text now states what happened (a developer build the glasses have not approved yet)
+  with the `devMode` / `sdkReg` facts, and `diagnostics` carries them as well.
+
+Verified: Android typecheck clean (65 classes); APK installed on the Pixel (versionCode left at
+12 so the glasses' own registry entry does not go stale); logcat at launch reads
+`dat_registration/is_dev_mode already true` and `Wearables.initialize -> true (devMode=true)`,
+where the old build reported devMode=false and no registered dev session.
+
+Pending, and it needs the wearer: unfold the glasses, tap *Connect glasses*, and read the session
+verdict from logcat (approve the Meta AI card if one appears).

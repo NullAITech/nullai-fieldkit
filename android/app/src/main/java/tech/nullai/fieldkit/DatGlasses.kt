@@ -50,6 +50,13 @@ object DatGlasses {
 
     private const val TAG = "DatGlasses"
 
+    // com.meta.wearable.dat.core.internal.registration.RegistrationManagerImpl keeps the SDK's
+    // dev-mode flag in these prefs: it READS is_dev_mode when the SDK object is constructed
+    // (default false) and only WRITES it back from a completed Meta AI registration result.
+    private const val REG_PREFS = "dat_registration"
+    private const val KEY_DEV_MODE = "is_dev_mode"
+    private const val APP_ID_KEY = "com.meta.wearable.mwdat.APPLICATION_ID"
+
     interface Listener {
         fun onStatus(text: String)
         fun onJpeg(jpeg: ByteArray)
@@ -83,6 +90,11 @@ object DatGlasses {
     // Activity, so the Activity is parked here between resume and pause.
     @Volatile private var currentActivity: Activity? = null
     @Volatile private var pendingRequest: RegistrationRequest? = null
+    /** Was is_dev_mode already in prefs at start (i.e. did Meta AI ever record a registration here)? */
+    @Volatile private var registrationEverRecorded = true
+    /** One escalation per process so a broken link cannot relaunch Meta AI in a loop. */
+    @Volatile private var escalatedRegistration = false
+    @Volatile private var selfHealedDevMode = false
 
     fun attachActivity(activity: Activity) {
         currentActivity = activity
@@ -114,6 +126,7 @@ object DatGlasses {
             com.facebook.debug.log.BLog.setLogLevel(Log.VERBOSE)
         } catch (_: Throwable) {}
         if (!initialized) {
+            ensureDevModeState(c)
             try {
                 val r = Wearables.initialize(c)
                 initialized = r.isSuccess
@@ -186,6 +199,71 @@ object DatGlasses {
         }
     }
 
+    /**
+     * True when this build carries no usable Meta app id (missing/"0") - i.e. a developer
+     * build, which the glasses will only ever serve in developer mode.
+     */
+    fun isDevApp(): Boolean {
+        val c = appCtx ?: return false
+        return try {
+            val ai = c.packageManager.getApplicationInfo(c.packageName, android.content.pm.PackageManager.GET_META_DATA)
+            // get() + toString(): aapt2 may type this dynamic value as int, getString() would be null.
+            val id = ai.metaData?.get(APP_ID_KEY)?.toString()?.trim().orEmpty()
+            id.isEmpty() || id == "0"
+        } catch (t: Throwable) {
+            Log.w(TAG, "isDevApp: manifest read failed (${t.message})")
+            false
+        }
+    }
+
+    /**
+     * A dev build must ask for a DEV session: the SDK reads is_dev_mode when it is
+     * constructed and only ever writes that key from a finished Meta AI registration, so a
+     * clean install (or a reinstall with a new versionCode) starts non-dev, requests a
+     * non-dev session, and the glasses answer DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED - which
+     * this app used to report as a firmware update nobody needed. Persist the flag first.
+     */
+    private fun ensureDevModeState(c: Context) {
+        if (!isDevApp()) return
+        try {
+            val prefs = c.getSharedPreferences(REG_PREFS, Context.MODE_PRIVATE)
+            registrationEverRecorded = prefs.contains(KEY_DEV_MODE)
+            if (!prefs.getBoolean(KEY_DEV_MODE, false)) {
+                val ok = prefs.edit().putBoolean(KEY_DEV_MODE, true).commit()
+                selfHealedDevMode = ok
+                Log.i(TAG, "$REG_PREFS/$KEY_DEV_MODE unset for a dev build - wrote true (ok=$ok)")
+            } else {
+                Log.i(TAG, "$REG_PREFS/$KEY_DEV_MODE already true")
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "ensureDevModeState failed", t)
+        }
+    }
+
+    /** True once the SDK has a recorded registration result (Meta AI's write, or our heal). */
+    fun hasSdkRegistrationRecord(): Boolean {
+        val c = appCtx ?: return false
+        return try {
+            c.getSharedPreferences(REG_PREFS, Context.MODE_PRIVATE).contains(KEY_DEV_MODE)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * The glasses answered with UPDATE_REQUIRED: they do not have this dev build provisioned.
+     * Hand the approval card to Meta AI once instead of repeating an untrue firmware story.
+     */
+    private fun escalateRegistrationOnce(reason: String) {
+        if (escalatedRegistration || registrationEverRecorded) return
+        val act = currentActivity ?: return
+        escalatedRegistration = true
+        Log.w(TAG, "escalating to SDK registration ($reason): no recorded registration on this install")
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try { register(act) } catch (t: Throwable) { Log.e(TAG, "escalateRegistrationOnce failed", t) }
+        }
+    }
+
     fun isStreaming(): Boolean = streaming && stream != null && session != null
 
     fun isConnecting(): Boolean = connecting
@@ -234,7 +312,8 @@ object DatGlasses {
         val ids = try { Wearables.devices.value } catch (_: Throwable) { emptySet() }
         val devMode = try { Wearables.isDevMode } catch (_: Throwable) { false }
         val parts = StringBuilder(
-            "reg=${registrationState()} devMode=$devMode devices=${ids.size}"
+            "reg=${registrationState()} devMode=$devMode devApp=${isDevApp()}" +
+            " sdkReg=${if (registrationEverRecorded) "recorded" else "missing"} healed=$selfHealedDevMode devices=${ids.size}"
         )
         // mwdat 1.0.1 gates: Meta AI app V292+ and glasses firmware V128+.
         parts.append(" sdk=1.0.1 needs[metaAI>=V292 fw>=V128]")
@@ -359,13 +438,16 @@ object DatGlasses {
                         sess.errors.collect { err ->
                             lastSessionErr = err.description
                             Log.w(TAG, "DeviceSession.errors -> ${err.name}: ${err.description}")
-                            // DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED is the commonest
-                            // field failure on Ray-Ban Meta gen 1: the glasses themselves
-                            // carry a DAT app that must be updated before a session is allowed.
+                            // DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED is NOT a firmware update: the
+                            // glasses are refusing a session for a dev build they have not been told
+                            // about (the SDK asked in non-dev mode because is_dev_mode was never set).
                             listener?.onStatus(
-                                if (err.name.contains("UPDATE_REQUIRED"))
-                                    "Your glasses need an update: Meta AI \u2192 App Connections \u2192 Spotter \u2192 Update, then tap Connect glasses again."
-                                else "Glasses session notice: ${err.description}")
+                                if (err.name.contains("UPDATE_REQUIRED")) {
+                                    escalateRegistrationOnce("UPDATE_REQUIRED")
+                                    "Glasses refused the session - not a firmware update. This build is a developer app and the glasses have not approved it yet " +
+                                        "(devMode=${Wearables.isDevMode}, sdkReg=${if (registrationEverRecorded) "recorded" else "missing"}). " +
+                                        "Finishing the approval card in Meta AI, then tap Connect glasses."
+                                } else "Glasses session notice: ${err.description}")
                         }
                     } catch (_: Throwable) {}
                 }
