@@ -38,6 +38,14 @@
   .badge { display:inline-block; font-size:12px; font-weight:700; border-radius:999px; padding:3px 10px; background:#123524; color:#7ee2a8; margin:0 6px 4px 0; }
   .badge.off { background:#1c1e24; color:var(--mut); }
   #log { font-size:12px; color:var(--mut); white-space:pre-wrap; max-height:110px; overflow:auto; }
+  #voicebar { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  #wave { flex:1; height:44px; width:100%; background:#0b0c10; border-radius:10px; border:1px solid var(--line); }
+  #vstate { font-size:12px; font-weight:700; letter-spacing:.08em; padding:4px 10px; border-radius:999px; border:1px solid var(--line); color:var(--mut); min-width:84px; text-align:center; }
+  #vstate.listening { color:#7fd49b; border-color:#7fd49b; }
+  #vstate.thinking { color:var(--gold); border-color:var(--gold); }
+  #vstate.speaking { color:#171106; background:var(--gold); border-color:var(--gold); }
+  #partial { font-size:14px; color:var(--mut); min-height:18px; margin-top:6px; font-style:italic; }
+  #lat { font-size:11px; color:var(--mut); margin-top:4px; }
 </style>
 </head>
 <body>
@@ -87,6 +95,13 @@
     <div class="label">YOUR COACH</div>
     <div id="say">Tell me the job below. I'll plan it, you review, then we begin.</div>
     <div id="obs"></div>
+    <div id="voicebar">
+      <button id="btnMic">🎙 Talk hands-free</button>
+      <canvas id="wave" width="600" height="88"></canvas>
+      <span id="vstate">idle</span>
+    </div>
+    <div id="partial"></div>
+    <div id="lat"></div>
   </div>
 
   <div class="card">
@@ -123,11 +138,92 @@ const tok = () => $("token").value.trim();
 const H = () => ({ "Authorization": "Bearer " + tok(), "Content-Type": "application/json" });
 function log(t) { const el = $("log"); el.textContent = (t + "\n" + el.textContent).slice(0, 3000); }
 function status(t) { $("status").textContent = t; }
-function speak(text) {
+// ---- voice: streamed TTS queue, barge-in, live state + waveform
+let vstate = "idle", curGen = -1, replyText = "", turnT0 = 0, firstAudio = false;
+function setState(st) { vstate = st; const el = $("vstate"); el.textContent = st; el.className = st; }
+function showSay(text) {
   $("say").innerHTML = "";
   const span = document.createElement("span"); span.textContent = text; $("say").appendChild(span);
-  try { const u = new SpeechSynthesisUtterance(text); speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
 }
+function stopSpeaking() { try { speechSynthesis.cancel(); } catch (e) {} }
+function enqueue(text) {  // chunks queue natively; no cancel between them
+  try {
+    const u = new SpeechSynthesisUtterance(text); u.rate = 1.08;
+    u.onstart = () => {
+      setState("speaking");
+      if (!firstAudio && turnT0) { firstAudio = true; $("lat").textContent += " · first audio " + Math.round(performance.now() - turnT0) + " ms"; }
+    };
+    u.onend = () => { if (!speechSynthesis.pending && !speechSynthesis.speaking) setState(listening ? "listening" : "idle"); };
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+function speak(text) { showSay(text); stopSpeaking(); enqueue(text); }
+
+let audioCtx = null, analyser = null, listening = false, rec = null;
+function drawWave() {
+  const c = $("wave"), x = c.getContext("2d"); x.clearRect(0, 0, c.width, c.height);
+  const mid = c.height / 2, n = 48, w = c.width / n;
+  let data = null;
+  if (analyser) { data = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(data); }
+  const t = performance.now() / 1000;
+  for (let i = 0; i < n; i++) {
+    let a;
+    if (vstate === "speaking") a = 0.25 + 0.6 * Math.abs(Math.sin(t * 9 + i * 0.5)) * Math.abs(Math.sin(t * 2.3 + i));
+    else if (vstate === "thinking") a = 0.12 + 0.12 * Math.sin(t * 4 - i * 0.35);
+    else if (data) { const v = data[Math.floor(i * data.length / n)]; a = Math.min(1, Math.abs(v - 128) / 40 + 0.04); }
+    else a = 0.04;
+    const h = Math.max(2, a * c.height * 0.9);
+    x.fillStyle = vstate === "listening" ? "#7fd49b" : "#e5c058";
+    x.fillRect(i * w + 2, mid - h / 2, w - 4, h);
+  }
+  requestAnimationFrame(drawWave);
+}
+requestAnimationFrame(drawWave);
+
+function barge() {  // the wearer started talking: cut the coach off now
+  if (vstate === "speaking" || vstate === "thinking" || speechSynthesis.speaking) {
+    stopSpeaking();
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "barge" }));
+  }
+}
+function sendUtterance(t) {
+  if (!t || !ws || ws.readyState !== 1) { log("not connected — tap Connect"); return; }
+  barge();
+  ws.send(JSON.stringify({ type: "speech", text: t, final: true, speaker: "wearer" }));
+  log("You: " + t); turnT0 = performance.now(); firstAudio = false; replyText = "";
+  $("lat").textContent = ""; setState("thinking");
+}
+async function startMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { log("This browser has no speech recognition — type instead (Chrome/Edge/Android work)."); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    audioCtx = audioCtx || new AudioContext();
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+  } catch (e) { log("mic: " + e.message); }
+  rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
+  rec.onresult = ev => {
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const r = ev.results[i], t = r[0].transcript.trim();
+      if (r.isFinal) { $("partial").textContent = ""; sendUtterance(t); }
+      else { interim += t + " "; }
+    }
+    if (interim.trim()) {
+      $("partial").textContent = interim.trim() + "…";
+      // barge on real words, not on the coach's own echo of one syllable
+      if (interim.trim().split(/\s+/).length >= 2) barge();
+    }
+  };
+  rec.onend = () => { if (listening) { try { rec.start(); } catch (e) {} } };  // keep listening
+  rec.onerror = e => { if (e.error === "not-allowed") { listening = false; $("btnMic").textContent = "🎙 Talk hands-free"; setState("idle"); log("mic blocked"); } };
+  listening = true; rec.start(); setState("listening"); $("btnMic").textContent = "■ Stop listening";
+}
+$("btnMic").onclick = () => {
+  if (listening) { listening = false; try { rec.stop(); } catch (e) {} setState("idle"); $("btnMic").textContent = "🎙 Talk hands-free"; }
+  else startMic();
+};
 
 // ---- synthetic test scenes: a desktop judge without a camera still drives
 // the real Eyes -> Advisor -> Director loop with changing frames.
@@ -188,11 +284,14 @@ function drawBoxes(boxes) {
   }
 }
 
+let wantOpen = false, retry = 0, lastMission;
 function connect(withMission) {
-  if (ws) { try { ws.close(); } catch (e) {} }
+  wantOpen = true; lastMission = withMission;
+  if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} }
   const url = relayBase().replace(/^http/, "ws") + "/v1/sessions?token=" + encodeURIComponent(tok());
   ws = new WebSocket(url);
   ws.onopen = () => {
+    retry = 0;
     const hello = { type: "hello", provider: "spark", guide: true, preset: $("preset").value };
     if (withMission) hello.mission_id = withMission;
     ws.send(JSON.stringify(hello));
@@ -201,12 +300,25 @@ function connect(withMission) {
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === "ready") status("Connected · " + m.provider + " · guide on · preset " + m.preset);
+    else if (m.type === "start") { curGen = m.gen; replyText = ""; }
+    else if (m.type === "delta") { if (m.gen === curGen) { replyText += m.text; showSay(replyText); } }
+    else if (m.type === "speak") { if (m.gen === curGen) enqueue(m.text); }
+    else if (m.type === "done") {
+      if (m.gen === curGen) { log("Coach: " + m.text); $("lat").textContent = "model first token " + m.first_ms + " ms · full " + m.ms + " ms" + ($("lat").textContent.includes("first audio") ? $("lat").textContent.slice($("lat").textContent.indexOf(" · first audio")) : ""); }
+      if (!speechSynthesis.speaking && !speechSynthesis.pending) setState(listening ? "listening" : "idle");
+    }
+    else if (m.type === "stop") { curGen = -1; stopSpeaking(); setState(listening ? "listening" : "idle"); }
     else if (m.type === "say") { speak(m.text); log("Coach: " + m.text); }
     else if (m.type === "observation") { $("obs").textContent = "Eyes: " + m.text + " — watches what changed."; drawBoxes(m.highlight); log("Eyes: " + m.text); }
     else if (m.type === "state" && m.mission) { missionId = m.mission.id; fetchMission(); }
     else if (m.type === "error") status("Relay: " + m.detail);
   };
-  ws.onclose = () => status("Disconnected.");
+  ws.onclose = () => {
+    if (!wantOpen) { status("Disconnected."); return; }
+    const wait = Math.min(8000, 500 * 2 ** retry++);  // smooth reconnect, same mission
+    status("Connection dropped — reconnecting in " + (wait / 1000).toFixed(1) + "s…");
+    setTimeout(() => { if (wantOpen) connect(lastMission); }, wait);
+  };
 }
 
 function renderSteps(m) {
@@ -284,9 +396,8 @@ $("btnNext").onclick = async () => {
 };
 $("btnShh").onclick = () => { if (ws) ws.send(JSON.stringify({ type: "pause" })); status("Shh — coach paused. Send any message to resume."); };
 $("btnTalk").onclick = () => {
-  const t = $("talkText").value.trim(); if (!t || !ws) return;
-  ws.send(JSON.stringify({ type: "speech", text: t, final: true, speaker: "wearer" }));
-  log("You: " + t); $("talkText").value = "";
+  const t = $("talkText").value.trim(); if (!t) return;
+  sendUtterance(t); $("talkText").value = "";
 };
 $("preset").onchange = () => { if (ws) ws.send(JSON.stringify({ type: "preset", name: $("preset").value })); };
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/pwa/sw.js").catch(() => {});

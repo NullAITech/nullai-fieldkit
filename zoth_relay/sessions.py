@@ -48,6 +48,40 @@ from .providers import Provider, Turn
 from .trio import Advisor, Director, Eyes, Preset, custom_preset, get_preset
 
 DEFAULT_HISTORY_BUDGET = 24000      # chars of transcript replayed per turn
+
+# Used when the client sends no system prompt. Replies are spoken aloud into
+# glasses, so the style is short, concrete and ear-first.
+DEFAULT_VOICE_SYSTEM = (
+    "You are FieldKit, a calm hands-free coach speaking into the wearer's ear while "
+    "their hands are busy. Reply in one or two short spoken sentences, under 35 words. "
+    "No markdown, lists, emoji or headings. Lead with the action. If an image is "
+    "attached, ground your answer in what is actually visible and say so briefly; "
+    "never invent details you cannot see. Use the mission and current step when given. "
+    "If something looks unsafe, say stop first. If unsure, ask one short question. "
+    "Never identify people by their face."
+)
+
+_SPEAK_BREAK = ".!?;:\n"
+
+
+def split_speakable(buf: str, first: bool) -> tuple[list[str], str]:
+    """Cut a streaming text buffer into chunks a TTS can start on.
+
+    Breaks after sentence punctuation; the first chunk may also break at a
+    comma once it has a few words, so the first audio starts sooner.
+    Returns (ready chunks, remainder still buffering).
+    """
+    out: list[str] = []
+    start = 0
+    for i, ch in enumerate(buf):
+        seg = buf[start:i + 1]
+        is_break = ch in _SPEAK_BREAK and (i + 1 == len(buf) or buf[i + 1].isspace())
+        early = first and not out and ch == "," and len(seg.split()) >= 4
+        if (is_break or early) and seg.strip():
+            out.append(seg.strip())
+            start = i + 1
+    return out, buf[start:]
+
 MIN_HISTORY_BUDGET = 500
 MAX_HISTORY_BUDGET = 200_000
 
@@ -445,7 +479,7 @@ class Session:
         gen = self.gen
         image, self._pending_frame = self._pending_frame, None
         clip, self._pending_clip = self._pending_clip, None
-        sys_prompt = self.system
+        sys_prompt = self.system or DEFAULT_VOICE_SYSTEM
         live = self.live_suffix(prompt)
         if live:
             sys_prompt = f"{sys_prompt}\n\n{live}" if sys_prompt else live
@@ -454,6 +488,16 @@ class Session:
         t0 = time.monotonic()
         full: list[str] = []
         done_ev: dict | None = None
+        spk_buf, spk_n, first_speak_ms = "", 0, None
+
+        async def speak(text: str) -> None:
+            nonlocal spk_n, first_speak_ms
+            if gen != self.gen or self.closed or not text:
+                return
+            if first_speak_ms is None:
+                first_speak_ms = int((time.monotonic() - t0) * 1000)
+            await self.send({"type": "speak", "text": text, "gen": gen, "seq": spk_n})
+            spk_n += 1
         try:
             async for ev in self.provider.stream_events(
                     turn, f"s{uuid.uuid4().hex[:8]}", self.transport):
@@ -461,8 +505,16 @@ class Session:
                     full.append(ev.get("text", ""))
                 elif ev.get("type") == "done":
                     done_ev = ev
+                if ev.get("type") == "done":
+                    await speak(spk_buf.strip())  # flush the tail before "done"
+                    spk_buf = ""
                 if gen == self.gen and not self.closed:
-                    await self.send(ev)
+                    await self.send({**ev, "gen": gen})
+                if ev.get("type") == "delta":
+                    # Stream sentence-sized chunks to the client's TTS as they form.
+                    chunks, spk_buf = split_speakable(spk_buf + ev.get("text", ""), spk_n == 0)
+                    for c in chunks:
+                        await speak(c)
         except asyncio.CancelledError:
             raise  # barged: partial reply is dropped, never enters the transcript
         except Exception as e:  # provider bug must not kill the socket loop
@@ -476,6 +528,7 @@ class Session:
             self.ctx.add("assistant", "".join(full))
         self.metrics.append({"kind": kind,
                              "first_ms": done_ev.get("first_ms") if done_ev else None,
+                             "first_speak_ms": first_speak_ms,
                              "ms": done_ev.get("ms") if done_ev else int((time.monotonic() - t0) * 1000)})
         self.metrics = self.metrics[-200:]
         if not self.closed:
