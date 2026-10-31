@@ -289,8 +289,15 @@ public class MainActivity extends Activity {
         // Deep link used by the demo script and by headless verification:
         // adb shell am start -n tech.nullai.fieldkit/.MainActivity --ez open_call true
         if (getIntent() != null && getIntent().getBooleanExtra("open_call", false)) {
+            // removeExtra clears only OUR parceled copy: the system keeps its own copy of this
+            // activity's original intent, so a recreate (config change, screen off, a restart
+            // from the launcher or the service) replays the extra. Consume it exactly once per
+            // process, otherwise the app re-opens the call screen by itself while a call is up.
+            if (!autoCallConsumed) {
+                autoCallConsumed = true;
+                pendingAutoCall = true;
+            }
             getIntent().removeExtra("open_call");
-            pendingAutoCall = true;
         }
         if (getIntent() != null && getIntent().getBooleanExtra("auto_connect", false)) {
             getIntent().removeExtra("auto_connect");
@@ -616,11 +623,48 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Type or say a goal first.", Toast.LENGTH_SHORT).show();
             return;
         }
-        status("Planning with Muse Wonder…");
+        status("Planning with " + providerName + "…");
+        // Ask the relay which presets it can serve here before naming one. A mission sent to a
+        // provider whose key is not on the relay answers 503 ("provider ... is not available"),
+        // and to the wearer that reads as the relay going away mid-session. The WS path already
+        // heals itself this way (see the `available` list below); REST guessed, so the plan failed
+        // exactly when the wearer asked for one.
+        http.newCall(authed("/v1/providers").get().build()).enqueue(new okhttp3.Callback() {
+            @Override public void onFailure(okhttp3.Call call, java.io.IOException e) {
+                createMission(goal, providerName);
+            }
+
+            @Override public void onResponse(okhttp3.Call call, Response resp) throws java.io.IOException {
+                String use = providerName;
+                try {
+                    JSONArray ok = new JSONObject(resp.body() != null ? resp.body().string() : "")
+                            .optJSONArray("configured");
+                    if (ok != null && ok.length() > 0) {
+                        boolean mine = false;
+                        for (int i = 0; i < ok.length(); i++) {
+                            if (ok.optString(i).equals(providerName)) { mine = true; break; }
+                        }
+                        if (!mine) {
+                            use = ok.optString(0);
+                            Log.i("RelayProvider", "mission preset " + providerName
+                                    + " is not configured here -> " + use + " (available=" + ok + ")");
+                        }
+                    }
+                } catch (Exception ignored) { }
+                createMission(goal, use);
+            }
+        });
+    }
+
+    /**
+     * POST the plan to the relay under a provider the relay said it can serve, and repeat what
+     * the relay actually said when it cannot.
+     */
+    private void createMission(final String goal, final String provider) {
         try {
             JSONObject body = new JSONObject();
             body.put("goal", goal);
-            body.put("provider", "wonder");
+            body.put("provider", provider);
             http.newCall(authed("/v1/missions")
                     .post(RequestBody.create(body.toString(), JSON)).build()).enqueue(new okhttp3.Callback() {
                 @Override public void onFailure(okhttp3.Call call, java.io.IOException e) {
@@ -630,7 +674,10 @@ public class MainActivity extends Activity {
                 @Override public void onResponse(okhttp3.Call call, Response resp) throws java.io.IOException {
                     String text = resp.body() != null ? resp.body().string() : "";
                     if (!resp.isSuccessful()) {
-                        status("Mission failed (" + resp.code() + "). Check relay/token.");
+                        String detail = "";
+                        try { detail = new JSONObject(text).optString("detail"); } catch (Exception ignored) { }
+                        status("Mission failed (" + resp.code() + ")"
+                                + (detail.isEmpty() ? ": check relay/token." : ": " + detail));
                         return;
                     }
                     try {
@@ -653,7 +700,7 @@ public class MainActivity extends Activity {
                             btnMission.setText("▶ Begin");
                         });
                         speak("Plan ready. Review the steps, then tap Begin when you're ready.");
-                        status("Planned with Wonder. Edit the goal + Start to re-plan, or Begin.");
+                        status("Planned with " + provider + ". Edit the goal + Start to re-plan, or Begin.");
                     } catch (Exception e) {
                         status("Mission reply unreadable.");
                     }
@@ -896,6 +943,16 @@ public class MainActivity extends Activity {
      * verdict for that turn, because the audio is then no longer the audio we measured).
      */
     private void listen(File wav) {
+        if (CallActivity.LIVE) {
+            // A live call owns the microphone until the wearer hangs up, and the recognizer is a
+            // separate Activity - opening it here is what put a foreign screen over the call and
+            // handed the foreground back to this singleTask home screen, tearing the call down.
+            // The call is already carrying this voice, so there is nothing to transcribe beside it:
+            // the WAV stays on disk and the next drain after hang-up picks it up.
+            keptBeingTranscribed = null;
+            status("The call is carrying your voice right now \u2014 nothing to transcribe until you hang up.");
+            return;
+        }
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US);
@@ -1541,6 +1598,8 @@ public class MainActivity extends Activity {
     private FrameRelay frameRelay;
     private TextView tvStream;
     private long lastGlassesPaintAt = 0L;
+    /** The open_call deep link is one-shot per process: a recreate replays the base intent. */
+    private static boolean autoCallConsumed;
     /** Set by --ez open_call true: the demo can open the call without a tap. */
     private boolean pendingAutoCall;
     /** Set by --ez auto_connect true: bring the relay session up without a tap. */
@@ -1602,6 +1661,10 @@ public class MainActivity extends Activity {
 
     /** Open the full-duplex Muse call. The mic stays open until the wearer hangs up. */
     private void startCall() {
+        if (CallActivity.LIVE) {
+            status("A call is already live — hang up first.");
+            return;
+        }
         Intent i = new Intent(this, CallActivity.class);
         i.putExtra(CallActivity.EXTRA_RELAY, etRelay.getText().toString().trim());
         i.putExtra(CallActivity.EXTRA_TOKEN, etToken.getText().toString().trim());

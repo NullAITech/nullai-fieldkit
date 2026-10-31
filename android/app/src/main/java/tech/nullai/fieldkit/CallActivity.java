@@ -50,6 +50,15 @@ public final class CallActivity extends Activity {
     private Button muteBtn, eyesBtn, avatarBtn, hangBtn;
 
     private boolean use3d, videoOn, muted, started, greeted;
+
+    /** True while a call owns the microphone and the screen (read by the home screen's voice
+     * paths).
+     *
+     * Android's recognizer is an Activity: opening one from the home screen during a call puts a
+     * foreign screen over the call and hands the foreground back to MainActivity afterwards, whose
+     * singleTask launch mode clears the call off the stack. The call says it is live so no voice
+     * path opens a competing screen; the wearer's audio is never cut, it is already going out. */
+    public static volatile boolean LIVE = false;
     /** Wall clock of the last logcat meter line, so the call is auditable off-screen. */
     private long lastMeterLog;
     private volatile float userLevel, museLevel;
@@ -167,6 +176,7 @@ public final class CallActivity extends Activity {
         main.removeCallbacks(ticker);
         if (call != null) call.hangUp();
         call = null;
+        LIVE = false;
         if (camFeed != null) {
             camFeed.stop();
             camFeed = null;
@@ -189,9 +199,17 @@ public final class CallActivity extends Activity {
         }
     }
 
+    /** A second open must never restart a live session (the home screen can replay its deep link). */
+    @Override
+    public void onNewIntent(android.content.Intent intent) {
+        if (LIVE || started) return;
+        super.onNewIntent(intent);
+    }
+
     /** Mint a token, open the session, and keep the wearer's mic open until hang-up. */
     private void open() {
         if (started) return;
+        LIVE = true;
         String relay = getIntent().getStringExtra(EXTRA_RELAY);
         String token = getIntent().getStringExtra(EXTRA_TOKEN);
         if (relay == null || token == null) {

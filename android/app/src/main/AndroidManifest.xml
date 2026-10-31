@@ -51,7 +51,14 @@
             android:name=".CallActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
+            android:taskAffinity="tech.nullai.fieldkit.call"
+            android:launchMode="singleInstance"
             android:screenOrientation="portrait" />
+        <!-- Its own task, deliberately. MainActivity is singleTask: when anything brings it
+             forwards during a call (the glasses notification, a recognizer result returning to
+             its caller), every activity above it is cleared - which used to destroy the live
+             call and drop the relay session mid-sentence. A separate task means the call only
+             ends when the wearer hangs up. -->
 
         <activity
             android:name=".MainActivity"
