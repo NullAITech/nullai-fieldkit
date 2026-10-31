@@ -126,7 +126,6 @@ placeholder files to pass, and treats "no files could be read" as a refusal (exi
 result. A fresh clone arms it once with `tools/install-prepush-hook.sh`; `--check` reports whether this
 clone is guarded.
 
-
 ## Timeline — how this was built
 
 Every row below is one commit or one verified run. The same story with the evidence attached — hashes re-checked, mirror hashes marked, blockers listed smallest-first — is in [docs/TIMELINE.md](docs/TIMELINE.md).
