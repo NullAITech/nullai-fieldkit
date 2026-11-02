@@ -764,9 +764,11 @@ public class MainActivity extends Activity {
     private void connectToggle() {
         savePrefs();
         if (glassesMode) {
-            if (connected && DatGlasses.INSTANCE.isStreaming()) {
-                disconnect();
+            // Disconnect whenever the relay is up or the glasses are mid-connect/streaming;
+            // previously it only worked while frames were flowing, so tapping it re-started the glasses flow.
+            if (connected || DatGlasses.INSTANCE.isStreaming() || DatGlasses.INSTANCE.isConnecting()) {
                 DatGlasses.INSTANCE.disconnect();
+                disconnect();
             } else {
                 if (!DatGlasses.INSTANCE.isStreaming() && !DatGlasses.INSTANCE.isConnecting()) {
                     startGlassesFlow();
