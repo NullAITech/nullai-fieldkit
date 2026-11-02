@@ -72,6 +72,7 @@
     </div>
     <button class="primary" id="btnConnect" style="margin-top:10px">Connect</button>
     <div id="status" style="margin-top:8px;font-size:13px;color:var(--mut)">Not connected.</div>
+    <div id="switched" style="display:none;margin-top:6px;font-size:12px;padding:3px 8px;border-radius:10px;background:#3a2f12;color:#e5c058;width:fit-content"></div>
   </div>
 
   <div class="card">
@@ -90,6 +91,11 @@
     <video id="cam" autoplay playsinline muted></video>
     <canvas id="scene" width="640" height="480" style="display:none"></canvas>
     <canvas id="overlay"></canvas>
+  </div>
+  <div class="card">
+    <div class="label">WHAT IT SAW</div>
+    <button id="btnReplay" style="margin-top:8px">Show replay</button>
+    <div id="replay" style="margin-top:8px"></div>
   </div>
   <div class="card">
     <div class="label">YOUR COACH</div>
@@ -311,6 +317,13 @@ function connect(withMission) {
     else if (m.type === "say") { speak(m.text); log("Coach: " + m.text); }
     else if (m.type === "observation") { $("obs").textContent = "Eyes: " + m.text + " — watches what changed."; drawBoxes(m.highlight); log("Eyes: " + m.text); }
     else if (m.type === "state" && m.mission) { missionId = m.mission.id; fetchMission(); }
+    else if (m.type === "model_switched") {
+      // live failover: drop the partial reply, show a small badge
+      replyText = "";
+      const b = $("switched"); b.style.display = "block";
+      b.textContent = "switched model · " + m.from + " → " + m.to + " (" + m.reason + ")";
+      log("Switched model: " + m.from + " → " + m.to + " (" + m.reason + ")");
+    }
     else if (m.type === "error") status("Relay: " + m.detail);
   };
   ws.onclose = () => {
@@ -320,6 +333,39 @@ function connect(withMission) {
     setTimeout(() => { if (wantOpen) connect(lastMission); }, wait);
   };
 }
+
+async function showReplay() {
+  const box = $("replay"); box.textContent = "Loading…";
+  const r = await fetch(relayBase() + "/v1/sessions/replay", { headers: H() });
+  if (!r.ok) { box.textContent = r.status === 404 ? "No session yet." : "Replay failed (" + r.status + ")."; return; }
+  const rep = await r.json(); box.textContent = "";
+  const head = document.createElement("div"); head.style.fontSize = "12px"; head.style.color = "var(--mut)";
+  head.textContent = "Models: " + (rep.models.join(", ") || "none") + " · highlights: " +
+    (rep.sam === "sam-3.1" ? "SAM 3.1" : "stand-in boxes (SAM 3.1 not configured)");
+  box.appendChild(head);
+  for (const st of rep.steps) {
+    const row = document.createElement("div"); row.style.margin = "10px 0";
+    if (st.image) {
+      const wrap = document.createElement("div"); wrap.style.position = "relative"; wrap.style.maxWidth = "320px";
+      const img = document.createElement("img"); img.src = st.image; img.style.width = "100%"; img.style.display = "block";
+      wrap.appendChild(img);
+      for (const b of st.boxes || []) {
+        const d = document.createElement("div");
+        Object.assign(d.style, { position: "absolute", left: b.x * 100 + "%", top: b.y * 100 + "%",
+          width: b.w * 100 + "%", height: b.h * 100 + "%",
+          border: "2px " + (b.source === "stand-in" ? "dashed #888" : "solid #e5c058") });
+        d.title = b.label || ""; wrap.appendChild(d);
+      }
+      row.appendChild(wrap);
+    }
+    const t = document.createElement("div"); t.style.fontSize = "13px";
+    t.textContent = "+" + st.offset_s + "s · " + (st.model || "?") +
+      (st.switched_from ? " (switched from " + st.switched_from + ")" : "") + " · " +
+      (st.kind === "observation" ? "saw: " : "said: ") + st.text;
+    row.appendChild(t); box.appendChild(row);
+  }
+}
+$("btnReplay").onclick = () => showReplay().catch(e => { $("replay").textContent = "Replay failed."; });
 
 function renderSteps(m) {
   const ol = $("steps"); ol.innerHTML = "";

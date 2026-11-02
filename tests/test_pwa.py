@@ -37,3 +37,11 @@ def test_pwa_ws_token_query_auth(tmp_path):
         ws.send_json({"type": "hello", "provider": "nope"})
         ev = ws.receive_json()
         assert ev["type"] == "error" and "unknown provider" in ev["detail"]
+
+
+def test_pwa_has_switched_badge_and_replay_view(tmp_path):
+    from pathlib import Path
+    html = (Path(__file__).parent.parent / "zoth_relay" / "pwa" / "index.html").read_text()
+    assert 'm.type === "model_switched"' in html and 'id="switched"' in html
+    assert "/v1/sessions/replay" in html and 'id="btnReplay"' in html
+    assert "innerHTML" not in html.split("async function showReplay")[1].split("function renderSteps")[0]

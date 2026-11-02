@@ -523,6 +523,10 @@ public class MainActivity extends Activity {
                         String line = ev.optString("text");
                         runOnUiThread(() -> tvStep.setText(line));
                         speak(line);
+                    } else if ("model_switched".equals(type)) {
+                        // live failover badge: Meta API stalled/errored, same turn re-run on fallback
+                        status("Switched model: " + ev.optString("from") + " \u2192 "
+                                + ev.optString("to") + " (" + ev.optString("reason") + ")");
                     } else if ("observation".equals(type)) {
                         status("Eyes: " + ev.optString("text"));
                     } else if ("state".equals(type) && ev.has("mission")) {
