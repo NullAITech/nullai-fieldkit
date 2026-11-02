@@ -609,6 +609,17 @@ public class MainActivity extends Activity {
         connected = false;
         btnConnect.setText(glassesMode ? "Connect glasses" : "Connect");
         status("Disconnected.");
+        // First run: quick goal-mode setup (network / repair / adventure / custom).
+        SharedPreferences gp = getSharedPreferences("fieldkit", MODE_PRIVATE);
+        if (!gp.getBoolean("goal_mode_asked", false)) {
+            gp.edit().putBoolean("goal_mode_asked", true).apply();
+            btnConnect.post(this::showModePicker);
+        }
+    }
+
+    private void showModePicker() {
+        ModePicker.show(this, http, relayBase(), token(),
+                (key, label) -> status("Goal mode: " + label + ". Change anytime in ⋯ options."));
     }
 
     private void sendWs(JSONObject obj) {
@@ -813,7 +824,10 @@ public class MainActivity extends Activity {
                 "Model preset: " + PRESETS[presetIdx][1] + " (next)",
                 connected ? "Disconnect" : "Connect",
                 "Register glasses in Meta AI",
-                "Pause coaching (Shh)"};
+                "Pause coaching (Shh)",
+                "Goal mode: " + (ModePicker.label(getSharedPreferences("fieldkit", MODE_PRIVATE)).isEmpty()
+                        ? "not set" : ModePicker.label(getSharedPreferences("fieldkit", MODE_PRIVATE))) + " (change)",
+                "Map HUD on calls: " + (getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("map_hud", false) ? "on" : "off") + " (toggle)"};
         new AlertDialog.Builder(this)
                 .setTitle("Spotter options")
                 .setItems(items, (d, which) -> {
@@ -824,6 +838,14 @@ public class MainActivity extends Activity {
                         case 3: connectToggle(); break;
                         case 4: DatGlasses.INSTANCE.register(MainActivity.this); break;
                         case 5: findViewById(R.id.btnShh).performClick(); break;
+                        case 6: showModePicker(); break;
+                        case 7: {
+                            SharedPreferences sp = getSharedPreferences("fieldkit", MODE_PRIVATE);
+                            boolean on = !sp.getBoolean("map_hud", false);
+                            sp.edit().putBoolean("map_hud", on).apply();
+                            status("Map HUD " + (on ? "on" : "off") + " for calls.");
+                            break;
+                        }
                     }
                 }).show();
     }

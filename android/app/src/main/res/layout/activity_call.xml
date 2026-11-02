@@ -46,6 +46,14 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone" />
+
+        <tech.nullai.fieldkit.avatar.MapHudView
+            android:id="@+id/mapHud"
+            android:layout_width="124dp"
+            android:layout_height="136dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="6dp"
+            android:visibility="gone" />
     </FrameLayout>
 
     <TextView
