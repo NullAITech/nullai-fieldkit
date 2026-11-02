@@ -60,6 +60,12 @@
              call and drop the relay session mid-sentence. A separate task means the call only
              ends when the wearer hangs up. -->
 
+        <!-- Nov 2: People & Voices (local, encrypted, wearer-saved only) -->
+        <activity
+            android:name=".PeopleActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

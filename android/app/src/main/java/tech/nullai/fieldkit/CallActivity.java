@@ -74,7 +74,7 @@ public final class CallActivity extends Activity {
         }
 
         @Override public void onJpeg(byte[] jpeg) {
-            if (videoOn && call != null) call.sendVideoFrame(jpeg);
+            if (eyesGlasses) onEyesFrame(jpeg);
         }
     };
 
@@ -139,9 +139,20 @@ public final class CallActivity extends Activity {
         eyesBtn = findViewById(R.id.btnEyes);
         avatarBtn = findViewById(R.id.btnAvatar);
         hangBtn = findViewById(R.id.btnHangUp);
+        sourceBtn = findViewById(R.id.btnSource);
+        detectBtn = findViewById(R.id.btnDetect);
+        preview = findViewById(R.id.ivEyesPreview);
+        visionTv = findViewById(R.id.tvVision);
 
         use3d = getIntent().getBooleanExtra(EXTRA_ON_GLASSES, false);
         videoOn = getIntent().getBooleanExtra(EXTRA_EYES, false);
+        eyesGlasses = use3d;   // starting default only; the Source button switches it live
+        sourceBtn.setText(eyesGlasses ? "Glasses" : "Phone cam");
+        sourceBtn.setOnClickListener(v -> switchSource(!eyesGlasses));
+        findViewById(R.id.btnRemember).setOnClickListener(v -> rememberPerson());
+        detectBtn.setOnClickListener(v -> toggleDetect());
+        findViewById(R.id.btnPeople).setOnClickListener(v ->
+                startActivity(new android.content.Intent(this, PeopleActivity.class)));
         applyAvatarMode();
         avatarBtn.setOnClickListener(v -> {
             use3d = !use3d;
@@ -181,6 +192,8 @@ public final class CallActivity extends Activity {
             camFeed.stop();
             camFeed = null;
         }
+        visionExec.shutdownNow();
+        if (detector != null) detector.close();
         if (DatGlasses.INSTANCE.getListener() == callEyes) {
             DatGlasses.INSTANCE.setListener(previousGlassesListener);
         }
@@ -250,11 +263,13 @@ public final class CallActivity extends Activity {
         muse2d.setVideoMode(videoOn);
         if (call != null) call.setVideoEnabled(videoOn);
         if (videoOn) {
-            if (use3d) {
-                setState("Eyes: the glasses feed the call.");
+            if (eyesGlasses) {
+                if (camFeed != null) { camFeed.stop(); camFeed = null; }
+                setState(DatGlasses.INSTANCE.isStreaming() ? "Eyes: the glasses feed the call."
+                        : "Eyes: glasses selected — waiting for the glasses stream (connect them from home).");
             } else if (camFeed == null) {
                 camFeed = new CamFeed(this, (jpeg, w, h) -> {
-                    if (videoOn && call != null) call.sendVideoFrame(jpeg);
+                    if (!eyesGlasses) onEyesFrame(jpeg);
                 }, 500);
                 camFeed.start();
                 setState("Eyes: the phone camera feeds the call.");
@@ -263,6 +278,200 @@ public final class CallActivity extends Activity {
             camFeed.stop();
             camFeed = null;
         }
+    }
+
+    // ------------------------------------------------------------------ Nov 2: eyes source, people, detections
+
+    private Button sourceBtn, detectBtn;
+    private android.widget.ImageView preview;
+    private TextView visionTv;
+    private volatile boolean eyesGlasses, detectOn, visionBusy;
+    private volatile byte[] lastJpeg;
+    private long lastVisionAt, lastSummaryAt;
+    private String lastSummary = "";
+    private tech.nullai.fieldkit.vision.Detector detector;
+    private final java.util.concurrent.ExecutorService visionExec =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.Map<String, Long> announced = new java.util.HashMap<>();
+
+    /** Swap the AI's eyes between phone camera and glasses without touching the live session. */
+    private void switchSource(boolean glasses) {
+        if (glasses == eyesGlasses) return;
+        eyesGlasses = glasses;
+        lastJpeg = null;
+        sourceBtn.setText(glasses ? "Glasses" : "Phone cam");
+        if (glasses && !DatGlasses.INSTANCE.isStreaming()) {
+            try { DatGlasses.INSTANCE.connect(); } catch (Throwable ignored) { }
+        }
+        if (videoOn) {
+            setEyes(true);
+        } else {
+            setState("Eyes source: " + (glasses ? "glasses" : "phone camera") + " (eyes are off).");
+        }
+        if (call != null && videoOn) {
+            call.sendText("(Context, no reply needed: the wearer just switched your camera to the "
+                    + (glasses ? "Meta glasses — first-person view." : "phone camera.") + ")");
+        }
+        addCaption("· eyes → " + (glasses ? "glasses" : "phone"));
+    }
+
+    private void toggleDetect() {
+        detectOn = !detectOn;
+        detectBtn.setText(detectOn ? "Detect on" : "Detect off");
+        preview.setVisibility(detectOn ? View.VISIBLE : View.GONE);
+        visionTv.setVisibility(detectOn ? View.VISIBLE : View.GONE);
+    }
+
+    /** Every frame from whichever source is live: to the model, and (throttled) to the detector. */
+    private void onEyesFrame(byte[] jpeg) {
+        if (!videoOn) return;
+        lastJpeg = jpeg;
+        if (call != null) call.sendVideoFrame(jpeg);
+        long now = System.currentTimeMillis();
+        boolean recognise = !tech.nullai.fieldkit.people.PeopleVault.get(this).isEmpty();
+        if ((!detectOn && !recognise) || visionBusy || now - lastVisionAt < 1200) return;
+        lastVisionAt = now;
+        visionBusy = true;
+        visionExec.execute(() -> {
+            try { runVision(jpeg); } catch (Throwable t) { Log.w("CallVision", "vision: " + t); }
+            finally { visionBusy = false; }
+        });
+    }
+
+    private tech.nullai.fieldkit.vision.Detector detector() {
+        if (detector == null) detector = new tech.nullai.fieldkit.vision.Detector(this);
+        return detector;
+    }
+
+    private static android.graphics.Bitmap decodeFrame(byte[] jpeg) {
+        android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+        o.inSampleSize = 2;   // ~half res is plenty for BlazeFace / hands at 1 fps
+        return android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
+    }
+
+    private void runVision(byte[] jpeg) {
+        android.graphics.Bitmap bmp = decodeFrame(jpeg);
+        if (bmp == null) return;
+        tech.nullai.fieldkit.vision.Detector.Result r = detector().detect(bmp, detectOn, detectOn);
+        // recognition: wearer-named people only, appearance match, announce once a minute at most
+        tech.nullai.fieldkit.people.PeopleVault vault = tech.nullai.fieldkit.people.PeopleVault.get(this);
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        for (android.graphics.RectF f : r.faces) {
+            float[] d = descriptor(bmp, f);
+            tech.nullai.fieldkit.people.PeopleVault.Person p = vault.matchFace(d);
+            if (p != null && !seen.contains(p.name)) seen.add(p.name);
+        }
+        long now = System.currentTimeMillis();
+        java.util.List<String> fresh = new java.util.ArrayList<>();
+        for (String n : seen) {
+            Long at = announced.get(n);
+            if (at == null || now - at > 60_000) { fresh.add(n); announced.put(n, now); }
+        }
+        String summary = r.summary();
+        boolean sendSummary = detectOn && !summary.equals(lastSummary) && now - lastSummaryAt > 20_000;
+        if (sendSummary) { lastSummary = summary; lastSummaryAt = now; }
+        android.graphics.Bitmap shown = detectOn ? drawBoxes(bmp, r) : null;
+        main.post(() -> {
+            if (detectOn) {
+                preview.setImageBitmap(shown);
+                visionTv.setText(summary + (seen.isEmpty() ? "" : "\nin view: " + String.join(", ", seen))
+                        + "  · " + r.ms + " ms");
+            }
+            if (call == null) return;
+            if (!fresh.isEmpty()) {
+                addCaption("· in view: " + String.join(", ", fresh));
+                call.sendText("(Context, no reply needed unless useful: an on-device appearance match "
+                        + "suggests " + String.join(", ", fresh) + " — whom the wearer saved — may be in view. "
+                        + "It can be wrong; don't assert it.)");
+            }
+            if (sendSummary) {
+                call.sendText("(Context, no reply needed: on-device detector sees " + summary + ".)");
+            }
+        });
+    }
+
+    private static android.graphics.Bitmap drawBoxes(android.graphics.Bitmap src,
+                                                     tech.nullai.fieldkit.vision.Detector.Result r) {
+        android.graphics.Bitmap out = src.copy(android.graphics.Bitmap.Config.ARGB_8888, true);
+        android.graphics.Canvas c = new android.graphics.Canvas(out);
+        android.graphics.Paint p = new android.graphics.Paint();
+        p.setStyle(android.graphics.Paint.Style.STROKE);
+        p.setStrokeWidth(Math.max(2f, out.getWidth() / 160f));
+        p.setColor(0xFF8FE3B0);
+        for (android.graphics.RectF f : r.faces) c.drawRect(f, p);
+        p.setColor(0xFFFFC857);
+        for (android.graphics.RectF f : r.objectBoxes) c.drawRect(f, p);
+        p.setStyle(android.graphics.Paint.Style.FILL);
+        p.setColor(0xFF6EC8FF);
+        for (tech.nullai.fieldkit.vision.Detector.Hand h : r.hands)
+            for (float[] pt : h.points) c.drawCircle(pt[0] * out.getWidth(), pt[1] * out.getHeight(), p.getStrokeWidth() * 1.5f, p);
+        return out;
+    }
+
+    /** Face crop (padded) -> the same coarse descriptor the rest of Spotter uses. */
+    private static float[] descriptor(android.graphics.Bitmap bmp, android.graphics.RectF f) {
+        android.graphics.Rect c = padded(bmp, f);
+        if (c.width() < 8 || c.height() < 8) return null;
+        int[] px = new int[c.width() * c.height()];
+        bmp.getPixels(px, 0, c.width(), c.left, c.top, c.width(), c.height());
+        return tech.nullai.fieldkit.people.PersonDescriptor.fromCrop(px, c.width(), c.height());
+    }
+
+    private static android.graphics.Rect padded(android.graphics.Bitmap bmp, android.graphics.RectF f) {
+        float pw = f.width() * 0.2f, ph = f.height() * 0.2f;
+        return new android.graphics.Rect(Math.max(0, (int) (f.left - pw)), Math.max(0, (int) (f.top - ph)),
+                Math.min(bmp.getWidth(), (int) (f.right + pw)), Math.min(bmp.getHeight(), (int) (f.bottom + ph)));
+    }
+
+    /** Consent-first: only the wearer's tap + typed name ever creates an entry. */
+    private void rememberPerson() {
+        byte[] jpeg = lastJpeg;
+        if (jpeg == null || !videoOn) {
+            setState("Turn Eyes on and point at the person first.");
+            return;
+        }
+        android.widget.EditText name = new android.widget.EditText(this);
+        name.setHint("Their name");
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Remember this person")
+                .setMessage("Saves a face crop of this frame on this phone only (encrypted). Ask them first.")
+                .setView(name)
+                .setPositiveButton("Save", (d, w) -> {
+                    String n = name.getText().toString().trim();
+                    if (n.isEmpty()) return;
+                    visionExec.execute(() -> saveFromFrame(jpeg, n));
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void saveFromFrame(byte[] jpeg, String n) {
+        android.graphics.Bitmap bmp = decodeFrame(jpeg);
+        if (bmp == null) return;
+        java.util.List<android.graphics.RectF> faces = detector().faces(bmp);
+        android.graphics.RectF best = null;
+        for (android.graphics.RectF f : faces)
+            if (best == null || f.width() * f.height() > best.width() * best.height()) best = f;
+        if (best == null) {
+            main.post(() -> setState("No face found in the frame — nothing saved. Try again closer."));
+            return;
+        }
+        float[] d = descriptor(bmp, best);
+        android.graphics.Rect c = padded(bmp, best);
+        android.graphics.Bitmap crop = android.graphics.Bitmap.createBitmap(bmp, c.left, c.top, c.width(), c.height());
+        float s = 160f / Math.max(crop.getWidth(), crop.getHeight());
+        if (s < 1f) crop = android.graphics.Bitmap.createScaledBitmap(crop,
+                Math.round(crop.getWidth() * s), Math.round(crop.getHeight() * s), true);
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        crop.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, bos);
+        String thumb = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP);
+        tech.nullai.fieldkit.people.PeopleVault.get(this).add(n, d, thumb);
+        announced.put(n, System.currentTimeMillis());
+        main.post(() -> {
+            setState("Saved " + n + " (this phone only). Add their voice from People.");
+            addCaption("· remembered " + n);
+            if (call != null) call.sendText("(Context: the wearer just saved the person in view as "
+                    + n + ". You may use that name for them.)");
+        });
     }
 
     private void applyAvatarMode() {

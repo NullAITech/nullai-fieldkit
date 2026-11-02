@@ -46,6 +46,28 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone" />
+
+        <!-- Nov 2: what the eyes see + on-device detection boxes (toggle: Detect) -->
+        <ImageView
+            android:id="@+id/ivEyesPreview"
+            android:layout_width="120dp"
+            android:layout_height="160dp"
+            android:layout_gravity="top|end"
+            android:scaleType="fitCenter"
+            android:background="#99000000"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvVision"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:background="@drawable/bg_pill"
+            android:padding="6dp"
+            android:fontFamily="monospace"
+            android:textColor="#8FE3B0"
+            android:textSize="11sp"
+            android:visibility="gone" />
     </FrameLayout>
 
     <TextView
@@ -106,5 +128,64 @@
             android:background="@drawable/bg_btn_dark"
             android:textColor="#FF9B9B"
             android:text="Hang up" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnSource"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="44dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:text="Phone cam" />
+
+        <Button
+            android:id="@+id/btnRemember"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="44dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:text="Remember" />
+
+        <Button
+            android:id="@+id/btnDetect"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="44dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:text="Detect off" />
+
+        <Button
+            android:id="@+id/btnPeople"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="44dp"
+            
+            android:background="@drawable/bg_btn_dark"
+            android:textColor="#E8EEF7"
+            android:textAllCaps="false"
+            android:textSize="12sp"
+            android:text="People" />
     </LinearLayout>
 </LinearLayout>

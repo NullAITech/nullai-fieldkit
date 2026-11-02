@@ -265,3 +265,10 @@ def test_ws_voice_print_hint(env):
             if ws.receive_json()["type"] == "done":
                 break
     assert any("sounded like Sam" in s["messages"][0]["content"] for s in env["seen"])
+
+
+def test_pwa_has_eyes_switch_and_people_card(env):
+    r = env["c"].get("/pwa")
+    assert r.status_code == 200
+    for marker in ('id="eyesSrc"', "Remember person", "PEOPLE &amp; VOICES", '"/v1/people"', 'type: "eyes"'):
+        assert marker in r.text

@@ -81,6 +81,24 @@
       <button id="btnCamMode">Use camera</button>
       <button id="btnSceneMode">Use test scenes (no camera)</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <select id="eyesSrc" title="Switch the AI's eyes mid-session">
+        <option value="phone">Eyes: phone back camera</option>
+        <option value="phone_front">Eyes: phone front camera</option>
+        <option value="glasses">Eyes: Meta glasses (via Spotter app)</option>
+      </select>
+      <button id="btnRemember">Remember person</button>
+    </div>
+    <div id="eyesNote" class="label" style="margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <div class="label">PEOPLE &amp; VOICES</div>
+    <div class="label" style="margin-top:4px">Only people you chose to save · stored on your relay, encrypted · never sent to third parties</div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnPeople">Refresh</button>
+      <button id="btnPeopleWipe">Delete everyone</button>
+    </div>
+    <div id="people" style="margin-top:8px"></div>
     <div id="sceneBtns" class="row" style="margin-top:8px;display:none">
       <button data-scene="0">Scene 1 · filter on</button>
       <button data-scene="1">Scene 2 · cover off</button>
@@ -261,7 +279,7 @@ function currentFrameDataUrl() {
 function sendFrames() {
   clearInterval(frameTimer);
   frameTimer = setInterval(() => {
-    if (!ws || ws.readyState !== 1) return;
+    if (!ws || ws.readyState !== 1 || eyesSource === "glasses") return;
     const url = currentFrameDataUrl(); if (!url) return;
     ws.send(JSON.stringify({ type: "frame", image: url.split(",")[1] }));
   }, 1500);
@@ -298,7 +316,7 @@ function connect(withMission) {
   ws = new WebSocket(url);
   ws.onopen = () => {
     retry = 0;
-    const hello = { type: "hello", provider: "spark", guide: true, preset: $("preset").value };
+    const hello = { type: "hello", provider: "spark", guide: true, preset: $("preset").value, eyes: eyesSource };
     if (withMission) hello.mission_id = withMission;
     ws.send(JSON.stringify(hello));
     sendFrames();
@@ -324,6 +342,9 @@ function connect(withMission) {
       b.textContent = "switched model · " + m.from + " → " + m.to + " (" + m.reason + ")";
       log("Switched model: " + m.from + " → " + m.to + " (" + m.reason + ")");
     }
+    else if (m.type === "eyes") { log("Eyes → " + m.source + (m.switched ? " (same session, context kept)" : "")); }
+    else if (m.type === "remembered") { log("Saved " + m.name + " (encrypted, on your relay)"); loadPeople(); }
+    else if (m.type === "person_in_view") { log("Maybe in view: " + m.names.join(", ")); }
     else if (m.type === "error") status("Relay: " + m.detail);
   };
   ws.onclose = () => {
@@ -447,6 +468,98 @@ $("btnTalk").onclick = () => {
 };
 $("preset").onchange = () => { if (ws) ws.send(JSON.stringify({ type: "preset", name: $("preset").value })); };
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/pwa/sw.js").catch(() => {});
+
+// ---- Nov 2 (hackathon): live eyes switch, remember-this-person, People & Voices
+let eyesSource = "phone";
+async function setEyesSource(src) {
+  const glasses = src === "glasses";
+  if (!glasses && !sceneMode) {
+    try {
+      const old = $("cam").srcObject; if (old) old.getTracks().forEach(t => t.stop());
+      $("cam").srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: src === "phone_front" ? "user" : "environment" } });
+    } catch (e) { log("camera: " + e.message); }
+  }
+  eyesSource = glasses ? "glasses" : "phone";
+  $("eyesNote").textContent = glasses ? "Glasses frames arrive from the Spotter app; this page stops sending its own." : "";
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "eyes", source: eyesSource }));
+}
+$("eyesSrc").onchange = () => setEyesSource($("eyesSrc").value);
+// Port of PersonDescriptor.java (8x8 grey + light-corrected 4x4x3 colour + 12-bin gradient, L2).
+function descriptorOf(cv) {
+  const w = cv.width, h = cv.height, d = cv.getContext("2d").getImageData(0, 0, w, h).data;
+  const lum = i => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  let fr = 0, fg = 0, fb = 0; const n = w * h;
+  for (let i = 0; i < d.length; i += 4) { fr += d[i]; fg += d[i + 1]; fb += d[i + 2]; }
+  fr /= n; fg /= n; fb /= n;
+  const v = [];
+  for (let gy = 0; gy < 8; gy++) for (let gx = 0; gx < 8; gx++) {
+    let s = 0, c = 0;
+    for (let y = (gy * h / 8) | 0; y < ((gy + 1) * h / 8) | 0; y++) for (let x = (gx * w / 8) | 0; x < ((gx + 1) * w / 8) | 0; x++) { s += lum((y * w + x) * 4); c++; }
+    v.push(c ? s / c : 0);
+  }
+  for (let gy = 0; gy < 4; gy++) for (let gx = 0; gx < 4; gx++) {
+    let r = 0, g = 0, b = 0, c = 0;
+    for (let y = (gy * h / 4) | 0; y < ((gy + 1) * h / 4) | 0; y++) for (let x = (gx * w / 4) | 0; x < ((gx + 1) * w / 4) | 0; x++) { const i = (y * w + x) * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; c++; }
+    c = c || 1; v.push(r / c - fr, g / c - fg, b / c - fb);
+  }
+  const hist = new Array(12).fill(0);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const gx = lum((y * w + x + 1) * 4) - lum((y * w + x - 1) * 4), gy = lum(((y + 1) * w + x) * 4) - lum(((y - 1) * w + x) * 4);
+    const m = Math.hypot(gx, gy); if (m < 1) continue;
+    let a = Math.atan2(gy, gx); if (a < 0) a += Math.PI;
+    hist[Math.min(11, (a / Math.PI * 12) | 0)] += m;
+  }
+  v.push(...hist);
+  const norm = Math.hypot(...v) || 1;
+  return v.map(x => x / norm);
+}
+async function faceCrop() {
+  const src = sceneMode ? $("scene") : $("cam");
+  const W = src.videoWidth || src.width, Hh = src.videoHeight || src.height; if (!W) return null;
+  let box = { x: W * 0.3, y: Hh * 0.2, w: W * 0.4, h: Hh * 0.5 }, found = false;   // fallback: centre
+  if ("FaceDetector" in window) {
+    try { const f = await new FaceDetector({ fastMode: true }).detect(src); if (f.length) { const b = f[0].boundingBox; box = { x: b.x - b.width * .2, y: b.y - b.height * .2, w: b.width * 1.4, h: b.height * 1.4 }; found = true; } } catch (e) {}
+  }
+  const c = document.createElement("canvas"); const s = Math.min(1, 160 / Math.max(box.w, box.h));
+  c.width = Math.max(8, Math.round(box.w * s)); c.height = Math.max(8, Math.round(box.h * s));
+  c.getContext("2d").drawImage(src, box.x, box.y, box.w, box.h, 0, 0, c.width, c.height);
+  return { canvas: c, found };
+}
+$("btnRemember").onclick = async () => {
+  if (!ws || ws.readyState !== 1) { status("Start a session first."); return; }
+  const name = (prompt("Remember this person as… (ask them first)") || "").trim(); if (!name) return;
+  const fc = await faceCrop(); if (!fc) { status("No camera frame yet."); return; }
+  if (!fc.found) log("No browser face detector here — saved the centre of the frame.");
+  ws.send(JSON.stringify({ type: "remember", name, descriptor: descriptorOf(fc.canvas),
+    thumb: fc.canvas.toDataURL("image/jpeg", 0.8).split(",")[1] }));
+};
+async function loadPeople() {
+  try {
+    const r = await fetch(relayBase() + "/v1/people", { headers: H() }); if (!r.ok) { $("people").textContent = "People: " + r.status; return; }
+    const j = await r.json(), el = $("people"); el.innerHTML = "";
+    if (!j.people.length) el.textContent = "Nobody saved yet.";
+    for (const p of j.people) {
+      const row = document.createElement("div"); row.className = "row"; row.style.alignItems = "center"; row.style.marginTop = "6px";
+      const img = document.createElement("img"); img.width = 56; img.height = 56; img.style.objectFit = "cover"; img.style.borderRadius = "8px"; img.alt = "";
+      if (p.thumb) img.src = "data:image/jpeg;base64," + p.thumb;
+      const t = document.createElement("div"); t.style.flex = "1";
+      const when = p.saved_at ? new Date(p.saved_at * 1000).toLocaleString() : "";
+      t.textContent = p.name + " · saved " + when + (p.has_voice ? " · voice ✓" : "");
+      const rn = document.createElement("button"); rn.textContent = "Rename";
+      rn.onclick = async () => { const n = (prompt("New name", p.name) || "").trim(); if (!n) return;
+        await fetch(relayBase() + "/v1/people/" + p.id, { method: "PATCH", headers: H(), body: JSON.stringify({ name: n }) }); loadPeople(); };
+      const del = document.createElement("button"); del.textContent = "Delete";
+      del.onclick = async () => { if (!confirm("Delete " + p.name + "?")) return; await fetch(relayBase() + "/v1/people/" + p.id, { method: "DELETE", headers: H() }); loadPeople(); };
+      row.append(img, t, rn);
+      if (p.has_voice) { const fv = document.createElement("button"); fv.textContent = "Forget voice";
+        fv.onclick = async () => { await fetch(relayBase() + "/v1/people/" + p.id + "/voice", { method: "DELETE", headers: H() }); loadPeople(); }; row.append(fv); }
+      row.append(del); el.append(row);
+    }
+  } catch (e) { $("people").textContent = "People: " + e.message; }
+}
+$("btnPeople").onclick = loadPeople;
+$("btnPeopleWipe").onclick = async () => { if (!confirm("Delete every saved person and voice?")) return;
+  await fetch(relayBase() + "/v1/people", { method: "DELETE", headers: H() }); loadPeople(); };
 </script>
 </body>
 </html>
