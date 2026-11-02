@@ -109,3 +109,7 @@ Date is the log's own section date, which is not always the commit date: v0.2.9 
 clearest case — built Oct 28, source committed Oct 30. Oct 29 is genuinely empty: no commits
 and no log entries, because the phone was off ADB. Where a row's commit lives in a different
 repository, it says so.
+
+## Nov 2 — presence, goal modes, map HUD
+
+Built Nov 2 at the hackathon on `hackathon/2026-11-02-avatar`: shared `presence.js` (2D/3D, braille/ASCII/dither/lattice) for `/pwa` and the Android call screen; goal-mode onboarding (`zoth_relay/modes.py`, `/v1/mode*`) fed into session, Guide and planner prompts; OSM mini-map HUD with compass. Python suite **276 passed**. APK built (not installed). Unverified: on-device animation, Android rotation/location feeding the map, and mode sync when the relay is configured after the mode was chosen.
