@@ -563,7 +563,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             hints = []
         plan_hints = [h["note"] for h in hints]
         if mp := agent_mode_prompt(agent.name):
-            plan_hints.append(mp)
+            plan_hints.insert(0, mp)  # first: planner keeps only 3 hints
         # Vision-aware planning: if this agent has a live frame, describe it
         # once so Wonder plans from what is actually there, not blind.
         vision_note = None
