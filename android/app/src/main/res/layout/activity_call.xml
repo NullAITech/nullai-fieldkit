@@ -52,7 +52,7 @@
             android:id="@+id/ivEyesPreview"
             android:layout_width="120dp"
             android:layout_height="160dp"
-            android:layout_gravity="top|end"
+            android:layout_gravity="top|start"
             android:scaleType="fitCenter"
             android:background="#99000000"
             android:visibility="gone" />
@@ -67,6 +67,14 @@
             android:fontFamily="monospace"
             android:textColor="#8FE3B0"
             android:textSize="11sp"
+            android:visibility="gone" />
+
+        <tech.nullai.fieldkit.avatar.MapHudView
+            android:id="@+id/mapHud"
+            android:layout_width="124dp"
+            android:layout_height="136dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="6dp"
             android:visibility="gone" />
     </FrameLayout>
 

@@ -26,6 +26,7 @@ from .tts import Tts
 from .config import Agent, Config, load_config
 from .context import TurnContext
 from .people import People, clean_vector
+from .modes import MODES, ModeStore, mode_prompt, onboard_step
 from .core import Relay, RelayError
 from .dashboard import DASHBOARD_HTML
 from .openapi_actions import actions_schema
@@ -80,6 +81,17 @@ class AskRequest(BaseModel):
 class LiveTokenRequest(BaseModel):
     mission: str | None = Field(None, max_length=2000)
     voice: str | None = Field(None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+
+
+class ModeSet(BaseModel):
+    mode: str = Field(..., min_length=1, max_length=200)
+    goal: str | None = Field(None, max_length=500)
+    answers: list[str] | None = Field(None, max_length=6)
+    map_hud: bool | None = None
+
+
+class ModeOnboard(BaseModel):
+    answers: list[str] = Field(default_factory=list, max_length=7)
 
 
 class MissionCreate(BaseModel):
@@ -336,6 +348,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             image = decode_image(body.image) if body.image else None
             t0 = time.monotonic()
             speech, mission = (body.speech or "").strip(), (body.mission or "").strip()
+            if mp := agent_mode_prompt(agent.name):
+                mission = f"{mission}\n{mp}" if mission else mp
             seen_line, seen_new = sighting(gcfg, body.descriptor, body.person_new)
             if name_person(gcfg, body.descriptor, body.name, body.speaker):
                 seen_line, seen_new = "", False
@@ -464,6 +478,51 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         # singleton so REST, sessions and MCP all see the same missions.
         return getattr(app.state, "missions", None) or MISSIONS
 
+    def modes_store() -> ModeStore:
+        st = getattr(app.state, "modes", None)
+        if st is None:
+            st = app.state.modes = ModeStore()
+        return st
+
+    def agent_mode_prompt(name: str) -> str:
+        try:
+            return mode_prompt(modes_store().get(name))
+        except Exception:
+            return ""
+
+    @app.get("/v1/mode", operation_id="getMode")
+    async def get_mode(agent: Agent = Depends(auth)):
+        st = modes_store().get(agent.name)
+        return {"mode": st.public() if st else None,
+                "modes": {k: {"label": v["label"], "blurb": v["blurb"], "map": v["map"]}
+                          for k, v in MODES.items()}}
+
+    @app.post("/v1/mode", operation_id="setMode")
+    async def set_mode(body: ModeSet, agent: Agent = Depends(auth)):
+        st = modes_store().set(agent.name, body.mode, body.goal or "", body.answers, body.map_hud)
+        relay.audit.write("mode_set", agent=agent.name, ip="?", via="rest", result="ok", mode=st.mode)
+        sess = ACTIVE_SESSIONS.get(agent.name)
+        if sess is not None:
+            sess.mode_text = mode_prompt(st)
+        return st.public()
+
+    @app.delete("/v1/mode", operation_id="clearMode")
+    async def clear_mode(agent: Agent = Depends(auth)):
+        modes_store().clear(agent.name)
+        return {"ok": True}
+
+    @app.post("/v1/mode/onboard", operation_id="onboardMode")
+    async def onboard_mode(body: ModeOnboard, agent: Agent = Depends(auth)):
+        step = onboard_step(body.answers)
+        if step.get("done"):
+            st = modes_store().set(agent.name, step["mode"], step.get("goal", ""),
+                                   step.get("answers"), step.get("map_hud"))
+            step["state"] = st.public()
+            sess = ACTIVE_SESSIONS.get(agent.name)
+            if sess is not None:
+                sess.mode_text = mode_prompt(st)
+        return step
+
     def fieldkit_providers() -> dict:
         ps = getattr(app.state, "session_providers", None)
         if ps is None:
@@ -502,6 +561,9 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             hints = second_brain.prior_hints(body.goal.strip())
         except Exception:
             hints = []
+        plan_hints = [h["note"] for h in hints]
+        if mp := agent_mode_prompt(agent.name):
+            plan_hints.append(mp)
         # Vision-aware planning: if this agent has a live frame, describe it
         # once so Wonder plans from what is actually there, not blind.
         vision_note = None
@@ -521,7 +583,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             plan = await plan_interview(
                 provider, body.goal.strip(),
                 getattr(app.state, "session_transport", None),
-                hints=[h["note"] for h in hints],
+                hints=plan_hints,
                 answers=(body.answers or None),
                 vision_note=vision_note,
                 memories=body.memories)
@@ -793,6 +855,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                            str(hello.get("preset") or "") or None, custom,
                            bool(hello.get("allow_outside", False)))
             sess.start_proactive()
+        sess.mode_text = agent_mode_prompt(agent.name)
         ACTIVE_SESSIONS[agent.name] = sess
         # counts/ids only: frames, speech and replies are never logged
         relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="open", provider=name)
@@ -950,6 +1013,16 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
     @app.get("/pwa/sw.js", include_in_schema=False)
     async def pwa_sw():
         return HTMLResponse((_pwa / "sw.js").read_text(encoding="utf-8"),
+                            media_type="application/javascript")
+
+    @app.get("/pwa/presence.js", include_in_schema=False)
+    async def pwa_presence():
+        return HTMLResponse((_pwa / "presence.js").read_text(encoding="utf-8"),
+                            media_type="application/javascript")
+
+    @app.get("/pwa/maphud.js", include_in_schema=False)
+    async def pwa_maphud():
+        return HTMLResponse((_pwa / "maphud.js").read_text(encoding="utf-8"),
                             media_type="application/javascript")
 
     @app.exception_handler(RelayError)

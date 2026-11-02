@@ -149,7 +149,7 @@ force a packaged build — do a typecheck, write docs, or run the smoke test on 
 | # | Open item | Why it matters | Owner |
 |---|---|---|---|
 | 1 | **Android build UNVERIFIED** — the guarded run only logged `waiting:` (box pinned 77–82 °C, abort at ≥82 °C) and was stopped; the on-disk APK is **17:05**, `MainActivity.java` **17:09**, so the APK predates the newest source. **v0.2.9 not installed.** | if the build is broken, the flagship client is dead | you (build+adb) |
-| 2 | **Glasses first frame never proven on hardware** | it's the headline story; unproven = risky to film on | Neal taps (Meta-side) |
+| 2 | **Glasses first frame never proven on hardware** | it's the headline story; unproven = risky to film on | Owner taps (Meta-side) |
 | 3 | **Live Mode / X RTMP not proven end-to-end** | optional bonus + viral; can sink a demo take if flaky | you |
 | 4 | **60-min bench not run; no latency graph** | Technical Depth 20% needs an artifact | you |
 | 5 | **Final 3-min demo not filmed** | Demo 25% + the viral post = the single biggest lever | you |
@@ -238,7 +238,7 @@ word; the face only triggers a **yes/no confirmation**. Keep it exactly that.
 5. **Public repo** at the submitted commit; **credits claimed** (log says done — verify billing + $150 alert).
 
 **STRETCH (attempt only after the above, in this order — each also feeds a bonus prize):**
-1. Glasses first frame on hardware (biggest Impact lift, but gated on Neal's Meta taps).
+1. Glasses first frame on hardware (biggest Impact lift, but gated on the owner's Meta taps).
 2. Live Mode `/overlay` in OBS + confirm gate on camera + audit proof.
 3. X RTMP stream + **viral post** (bonus: Most Viral $20K).
 4. Spark Open soak on Baseten/Modal (bonus: Best Open Weights $10K).
@@ -271,7 +271,7 @@ Six days: **Fri Oct 30 → Wed Nov 4.** Two non-negotiables each day at the top;
   build, wait for it, don't chain gradle.
 - **Install.** Pixel on USB (`adb devices` authorized) → `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`.
   Confirm with `dumpsys package tech.nullai.fieldkit | grep versionName` (expect ≥ 0.2.9 / code ≥ 11). If ADB
-  says a device is `unauthorized`, that is a **Neal tap**, not a code bug — log it and move on.
+  says a device is `unauthorized`, that is a **owner tap**, not a code bug — log it and move on.
 - **Relay up.** Confirm `:8770` health on loopback + Tailscale. If it's down from a vault lock, one
   `zoth-vault unlock` → relaunch (`nullai-fieldkit/.venv`, `relay-runtime` config, `setsid -f`). **Do not**
   `daemon restart`.

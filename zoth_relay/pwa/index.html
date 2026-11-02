@@ -46,6 +46,16 @@
   #vstate.speaking { color:#171106; background:var(--gold); border-color:var(--gold); }
   #partial { font-size:14px; color:var(--mut); min-height:18px; margin-top:6px; font-style:italic; }
   #lat { font-size:11px; color:var(--mut); margin-top:4px; }
+  #presenceWrap { position:relative; height:300px; border-radius:14px; overflow:hidden; border:1px solid var(--line); background:#06070a; }
+  #presence { width:100%; height:100%; display:block; }
+  #maphudWrap { position:absolute; right:8px; top:8px; width:118px; height:118px; display:none; }
+  #maphudWrap.on { display:block; }
+  #maphud { width:100%; height:100%; display:block; }
+  #osmAttr { position:absolute; right:0; top:120px; font-size:9px; color:var(--mut); white-space:nowrap; }
+  #osmAttr a { color:var(--mut); }
+  #modeBadge { position:absolute; left:10px; top:10px; font-size:11px; font-weight:700; letter-spacing:.06em; padding:3px 9px; border-radius:999px; border:1px solid var(--gold); color:var(--gold); background:#06070acc; }
+  .choice { display:block; width:100%; text-align:left; margin-top:6px; }
+  .choice small { display:block; color:var(--mut); font-weight:400; }
 </style>
 </head>
 <body>
@@ -54,6 +64,35 @@
   <div class="sub">by NullAI — the same live coach the glasses run, in your browser. No glasses needed.</div>
   <div class="principles"><b>Watches what changed.</b> <b>Asks before it acts.</b> Speaks first when a step is done.</div>
   <div class="dots"></div>
+
+  <div class="card" id="presenceCard">
+    <div class="label">SPOTTER</div>
+    <div id="presenceWrap" style="margin-top:8px">
+      <canvas id="presence"></canvas>
+      <span id="modeBadge">NO MODE</span>
+      <div id="maphudWrap"><canvas id="maphud"></canvas>
+        <div id="osmAttr">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnDim">3D</button>
+      <select id="pstyle">
+        <option value="braille">Braille</option><option value="ascii">ASCII</option>
+        <option value="dither">Dither</option><option value="lattice">Lattice</option>
+      </select>
+      <button id="btnMap">Map HUD</button>
+      <button id="btnModeChange">Change mode</button>
+    </div>
+  </div>
+
+  <div class="card" id="onboard" style="display:none">
+    <div class="label">SET UP SPOTTER</div>
+    <div id="obQ" style="margin-top:8px;font-weight:700"></div>
+    <div id="obChoices"></div>
+    <div class="row" id="obAnswerRow" style="margin-top:8px;display:none">
+      <input id="obAnswer" placeholder="Type your answer…">
+      <button id="btnObNext">Next</button>
+    </div>
+  </div>
 
   <div class="card">
     <div class="label">CONNECT</div>
@@ -154,6 +193,8 @@
     <div id="log"></div>
   </div>
 </main>
+<script src="/pwa/presence.js"></script>
+<script src="/pwa/maphud.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let ws = null, missionId = "", pendingId = "", frameTimer = null, sceneMode = false, sceneIdx = -1;
@@ -164,7 +205,7 @@ function log(t) { const el = $("log"); el.textContent = (t + "\n" + el.textConte
 function status(t) { $("status").textContent = t; }
 // ---- voice: streamed TTS queue, barge-in, live state + waveform
 let vstate = "idle", curGen = -1, replyText = "", turnT0 = 0, firstAudio = false;
-function setState(st) { vstate = st; const el = $("vstate"); el.textContent = st; el.className = st; }
+function setState(st) { vstate = st; const el = $("vstate"); el.textContent = st; el.className = st; if (window.presence) presence.setState(st); }
 function showSay(text) {
   $("say").innerHTML = "";
   const span = document.createElement("span"); span.textContent = text; $("say").appendChild(span);
@@ -177,6 +218,7 @@ function enqueue(text) {  // chunks queue natively; no cancel between them
       setState("speaking");
       if (!firstAudio && turnT0) { firstAudio = true; $("lat").textContent += " · first audio " + Math.round(performance.now() - turnT0) + " ms"; }
     };
+    u.onboundary = () => { if (window.presence) presence.pulse(0.45); };  // word beats drive the mouth (speechSynthesis exposes no amplitude)
     u.onend = () => { if (!speechSynthesis.pending && !speechSynthesis.speaking) setState(listening ? "listening" : "idle"); };
     speechSynthesis.speak(u);
   } catch (e) {}
@@ -194,7 +236,7 @@ function drawWave() {
     let a;
     if (vstate === "speaking") a = 0.25 + 0.6 * Math.abs(Math.sin(t * 9 + i * 0.5)) * Math.abs(Math.sin(t * 2.3 + i));
     else if (vstate === "thinking") a = 0.12 + 0.12 * Math.sin(t * 4 - i * 0.35);
-    else if (data) { const v = data[Math.floor(i * data.length / n)]; a = Math.min(1, Math.abs(v - 128) / 40 + 0.04); }
+    else if (data) { const v = data[Math.floor(i * data.length / n)]; a = Math.min(1, Math.abs(v - 128) / 40 + 0.04); if (window.presence && i % 8 === 0) presence.setLevels(null, a); }
     else a = 0.04;
     const h = Math.max(2, a * c.height * 0.9);
     x.fillStyle = vstate === "listening" ? "#7fd49b" : "#e5c058";
@@ -323,7 +365,7 @@ function connect(withMission) {
   };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if (m.type === "ready") status("Connected · " + m.provider + " · guide on · preset " + m.preset);
+    if (m.type === "ready") { status("Connected · " + m.provider + " · guide on · preset " + m.preset); loadMode(); }
     else if (m.type === "start") { curGen = m.gen; replyText = ""; }
     else if (m.type === "delta") { if (m.gen === curGen) { replyText += m.text; showSay(replyText); } }
     else if (m.type === "speak") { if (m.gen === curGen) enqueue(m.text); }
@@ -560,6 +602,55 @@ async function loadPeople() {
 $("btnPeople").onclick = loadPeople;
 $("btnPeopleWipe").onclick = async () => { if (!confirm("Delete every saved person and voice?")) return;
   await fetch(relayBase() + "/v1/people", { method: "DELETE", headers: H() }); loadPeople(); };
+// ---- presence (animated AI face), goal mode onboarding, mini-map HUD
+const LS = k => localStorage.getItem("spotter." + k), LSset = (k, v) => localStorage.setItem("spotter." + k, v);
+window.presence = Presence.mount($("presence"), { mode: LS("dim") || "2d", style: LS("style") || "braille" });
+$("pstyle").value = presence.style; $("btnDim").textContent = presence.mode === "3d" ? "2D" : "3D";
+$("btnDim").onclick = () => { presence.setMode(presence.mode === "3d" ? "2d" : "3d"); LSset("dim", presence.mode); $("btnDim").textContent = presence.mode === "3d" ? "2D" : "3D"; };
+$("pstyle").onchange = () => { presence.setStyle($("pstyle").value); LSset("style", $("pstyle").value); };
+const hud = MapHud.mount($("maphud"), { onHeading: h => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "compass", heading: h, source: "phone" })); } });
+function showMap(on) { $("maphudWrap").classList.toggle("on", on); on ? hud.start() : hud.stop(); LSset("map", on ? "1" : "0"); }
+$("btnMap").onclick = () => showMap(!$("maphudWrap").classList.contains("on"));
+if (LS("map") === "1") showMap(true);
+function applyMode(st) {
+  if (!st) { $("modeBadge").textContent = "NO MODE"; return; }
+  $("modeBadge").textContent = st.label.toUpperCase();
+  LSset("mode", JSON.stringify(st));
+  if (LS("map") == null || st.mode === "adventure") showMap(!!st.map_hud);
+}
+let obAnswers = [];
+async function obStep(ans) {
+  if (ans !== undefined) obAnswers.push(ans);
+  let r;
+  try { r = await fetch(relayBase() + "/v1/mode/onboard", { method: "POST", headers: H(), body: JSON.stringify({ answers: obAnswers }) }); } catch (e) { r = null; }
+  if (!r || !r.ok) { $("obQ").textContent = "Connect with your relay token first, then tap Change mode."; return; }
+  const s = await r.json();
+  $("onboard").style.display = "";
+  $("obChoices").innerHTML = ""; $("obAnswerRow").style.display = "none";
+  if (s.done) { $("onboard").style.display = "none"; applyMode(s.state); log("Mode set: " + s.label); return; }
+  $("obQ").textContent = s.question;
+  if (s.choices) {
+    for (const c of s.choices) {
+      const b = document.createElement("button"); b.className = "choice";
+      b.textContent = c.label; const sm = document.createElement("small"); sm.textContent = c.blurb; b.appendChild(sm);
+      b.onclick = () => obStep(c.key); $("obChoices").appendChild(b);
+    }
+    $("obAnswerRow").style.display = ""; $("obAnswer").placeholder = "…or say it your way: i'd like to fix this car";
+  } else { $("obAnswerRow").style.display = ""; $("obAnswer").placeholder = "Type your answer…"; }
+  $("obAnswer").value = ""; $("obAnswer").focus();
+}
+$("btnObNext").onclick = () => { const v = $("obAnswer").value.trim(); if (v) obStep(v); };
+$("obAnswer").addEventListener("keydown", e => { if (e.key === "Enter") $("btnObNext").click(); });
+$("btnModeChange").onclick = () => { obAnswers = []; obStep(); };
+async function loadMode() {
+  try {
+    const r = await fetch(relayBase() + "/v1/mode", { headers: H() });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j.mode) applyMode(j.mode); else { obAnswers = []; obStep(); }
+  } catch (e) {}
+}
+try { const cached = JSON.parse(LS("mode") || "null"); if (cached) applyMode(cached); } catch (e) {}
 </script>
 </body>
 </html>

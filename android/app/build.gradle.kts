@@ -11,8 +11,8 @@ android {
         applicationId = "tech.nullai.fieldkit"
         minSdk = 30
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.3.1"
+        versionCode = 14
+        versionName = "0.3.2"
         // Meta Wearables app id. Default "0" = DAT Developer Mode (Meta AI app >
         // glasses > Developer Mode must list Spotter). Override for production
         // with -PmwdatAppId=<id from Wearables Developer Center>. A placeholder
@@ -60,3 +60,12 @@ dependencies {
     // On-device face / hand / object detection (Apache-2.0). Models in assets/models.
     implementation("com.google.mediapipe:tasks-vision:0.10.14")
 }
+
+// Spotter Presence + map HUD: ship the same JS the /pwa uses (single source
+// in zoth_relay/pwa) as WebView assets, copied at build time.
+val copyPresenceAssets by tasks.registering(Copy::class) {
+    from(rootProject.file("../zoth_relay/pwa")) { include("presence.js", "maphud.js") }
+    into(layout.buildDirectory.dir("generated/presenceAssets/presence"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/presenceAssets"))
+tasks.named("preBuild") { dependsOn(copyPresenceAssets) }

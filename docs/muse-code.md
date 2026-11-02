@@ -6,7 +6,7 @@
 |---|---|
 | MCP URL (local, no tunnel) | `http://127.0.0.1:8765/mcp` (streamable HTTP) |
 | Auth | `Authorization: Bearer <muse token>` |
-| Token | the `muse` line in `~/.config/zoth-relay/agent-tokens.txt` (mode 0600, Neal's account). Never paste it into chat, git or logs. |
+| Token | the `muse` line in `~/.config/zoth-relay/agent-tokens.txt` (mode 0600, the owner's account). Never paste it into chat, git or logs. |
 | Agent / profile | `muse` / **`dev`** |
 | Workspace | `/home/zoth-relay/agent-workspace/muse` |
 
@@ -29,7 +29,7 @@ Muse Code 1.4.6 has **no `muse mcp add`**. Declare the server in
 
 Keep `settings.json` at mode 0600 because it holds the token. Don't run `muse mcp login zoth-relay`
 (that's for OAuth servers). Prefer the HTTP URL over `mcp-stdio`: stdio runs the relay as *your*
-user, outside the systemd sandbox. A remote URL needs a tunnel, which is off until Neal enables it.
+user, outside the systemd sandbox. A remote URL needs a tunnel, which is off until the owner enables it.
 
 ## The `dev` profile (what Muse may do)
 

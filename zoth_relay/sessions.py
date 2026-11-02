@@ -140,6 +140,7 @@ class Session:
         self.ctx = BoundedContext(history_budget)
         self.mission = ""
         self.system = ""
+        self.mode_text = ""  # goal mode (modes.py) folded into prompts
         self.live = None          # per-turn guidance context (speaker/focus/sighting), see set_live
         self.focus = FocusTracker()      # what he is working on, decayed over speech + captions
         self._last_hash: str | None = None
@@ -440,7 +441,10 @@ class Session:
         if await self._maybe_advance_mission(obs.text):
             return
         suggestions = await self._advisor.advise(obs, self._mission_text())
-        dec = await self._director.decide(obs, suggestions, "", self._mission_text(), self.preset)
+        mt = self._mission_text()
+        if self.mode_text:
+            mt = f"{mt}\n{self.mode_text}" if mt else self.mode_text
+        dec = await self._director.decide(obs, suggestions, "", mt, self.preset)
         self.metrics.append({"kind": "proactive", "speak": dec.speak, "reason": dec.reason})
         self.metrics = self.metrics[-200:]
         if dec.speak:
@@ -578,6 +582,8 @@ class Session:
         image, self._pending_frame = self._pending_frame, None
         clip, self._pending_clip = self._pending_clip, None
         sys_prompt = self.system or DEFAULT_VOICE_SYSTEM
+        if self.mode_text:
+            sys_prompt = f"{sys_prompt}\n\n{self.mode_text}"
         live = self.live_suffix(prompt)
         vis = self.vision_suffix()
         if vis:

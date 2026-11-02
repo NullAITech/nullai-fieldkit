@@ -6,3 +6,4 @@ httpx==0.28.1
 starlette==0.41.3
 pydantic==2.14.1
 anyio==4.15.1
+cryptography>=42  # People store encryption at rest (Fernet); optional, plaintext 0600 fallback

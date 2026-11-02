@@ -2,7 +2,7 @@
 
 Two free modes, both configured under `guide:` in config.yaml:
 
-* hermes    - frame + transcript + mission go to Neal's own Hermes Agent through its local
+* hermes    - frame + transcript + mission go to the user's own Hermes Agent through its local
               OpenAI-compatible API server (http://127.0.0.1:8642/v1, key API_SERVER_KEY).
               If Hermes is down, falls back to Nous Portal directly (key NOUS_API_KEY, kept only
               on the laptop in secrets.env).
@@ -34,21 +34,21 @@ from .context import FocusTracker, TurnContext
 
 SILENT = "SILENT"
 GUIDE_SYSTEM = (
-    "You are Zoth, a mission coach speaking into Neal's ear through smart glasses. "
+    "You are Zoth, a mission coach speaking into the user's ear through smart glasses. "
     "You get a camera frame of what he sees, what he just said (may be empty) and his mission. "
     "Reply with ONE short spoken sentence (max 25 words): a concrete next step or a direct answer. "
     "No markdown, no lists, no preamble. Never identify people by face. "
     f"If he said nothing and there is nothing new or useful to say, reply exactly {SILENT}."
 )
 AGY_PROMPT = (
-    "You are Zoth, a mission coach speaking into Neal's ear through smart glasses. Do not use tools, "
+    "You are Zoth, a mission coach speaking into the user's ear through smart glasses. Do not use tools, "
     "do not edit files; just answer. Below is a rolling transcript of what his glasses camera saw "
     "(captions from a small local vision model, oldest first, may contain errors), his mission, "
     "what he just said, and what you suggested recently.\n"
     "Reply with ONE short spoken sentence (max 25 words) suggesting what he could do next, or "
     "answering him. No markdown. Don't repeat a recent suggestion. "
     f"If nothing is worth saying, reply exactly {SILENT}.\n\n"
-    "{extra}MISSION: {mission}\n\nWHAT THE GLASSES SAW:\n{seen}\n\nNEAL JUST SAID: {speech}\n\n"
+    "{extra}MISSION: {mission}\n\nWHAT THE GLASSES SAW:\n{seen}\n\nUSER JUST SAID: {speech}\n\n"
     "YOUR RECENT SUGGESTIONS:\n{recent}\n"
 )
 CAPTION_PROMPT = "Describe this image in one short sentence."
@@ -270,7 +270,7 @@ class Guide:
             sys_txt = GUIDE_SYSTEM + (f"\nMission: {mission}" if mission else "") + ctx.system_suffix()
             msgs = [{"role": "system", "content": sys_txt}]
             msgs += [{"role": r, "content": c} for r, c in s.turns]
-            ask = f'Neal said: "{speech}"' if speech else "(Neal said nothing. Glance at the frame; speak only if useful.)"
+            ask = f'User said: "{speech}"' if speech else "(User said nothing. Glance at the frame; speak only if useful.)"
             url = f"data:{image[1]};base64," + base64.b64encode(image[0]).decode("ascii") if image else None
 
             def with_frame(target: AskTarget) -> list[dict]:
