@@ -329,7 +329,14 @@ object DatGlasses {
         return parts.toString()
     }
 
+    // Throttle: each stop/start disposes the ACDC BLE link lease mid-connect, so nudge sparingly.
+    private val lastNudgeAt = java.util.concurrent.ConcurrentHashMap<DeviceIdentifier, Long>()
+    @Volatile private var nudgesThisConnect = 0
+    private val NUDGE_MIN_INTERVAL_MS = 20_000L
+    private val MAX_NUDGES_PER_CONNECT = 3
+
     private fun nudgeDisconnectedDevices() {
+        if (nudgesThisConnect >= MAX_NUDGES_PER_CONNECT) return
         try {
             val wearablesImplField = Wearables::class.java.getDeclaredField("instance")
             wearablesImplField.isAccessible = true
@@ -352,7 +359,14 @@ object DatGlasses {
                 val devId = k as? DeviceIdentifier ?: continue
                 if (linkedDev == null) continue
                 val curLink = try { metaMap[devId]?.value?.linkState } catch (_: Throwable) { null }
-                if (curLink != LinkState.CONNECTED) {
+                if (curLink == LinkState.CONNECTED || curLink == LinkState.CONNECTING) continue
+                val now = android.os.SystemClock.elapsedRealtime()
+                val last = lastNudgeAt[devId]
+                if (last != null && now - last < NUDGE_MIN_INTERVAL_MS) continue
+                if (nudgesThisConnect >= MAX_NUDGES_PER_CONNECT) break
+                run {
+                    lastNudgeAt[devId] = now
+                    nudgesThisConnect++
                     Log.i(TAG, "Nudging ACDC link lease for $devId (curLink=$curLink)")
                     stopMethod?.invoke(devMgr, devId)
                     startMethod?.invoke(devMgr, devId, linkedDev)
@@ -375,6 +389,7 @@ object DatGlasses {
         if (connecting && job?.isActive == true) return
 
         connecting = true
+        nudgesThisConnect = 0
         frameCount = 0
         job?.cancel()
         closeSessionInternal()
