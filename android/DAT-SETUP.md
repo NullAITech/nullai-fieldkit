@@ -18,7 +18,7 @@ glasses app did: through the **Meta AI app** on this phone, using Meta's
 - Manifest carries `com.meta.wearable.mwdat.APPLICATION_ID` plus analytics
   and crash-reporting opt-outs (privacy: both off).
 
-## What Neal must do once (Meta-side)
+## What the owner must do once (Meta-side)
 
 Fast path (hackathon, works today):
 

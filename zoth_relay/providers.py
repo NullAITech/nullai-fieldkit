@@ -223,7 +223,7 @@ def provider_presets() -> dict[str, Provider]:
                                                      api_key_env="META_API_KEY", max_tokens=1200),
         # Meta open weights (Best Open Weights track): Muse Spark Open on
         # partner hosts. First-class per host; each is env-gated and never
-        # silently routed until its key lands (Neal claims via zoth-vault).
+        # silently routed until its key lands (the owner claims via zoth-vault).
         # Baseten: BASETEN_API_KEY (+ optional SPARK_OPEN_BASE_URL override).
         "spark-open": OpenAICompatProvider(
             "spark-open",

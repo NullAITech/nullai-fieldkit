@@ -195,7 +195,7 @@ def test_ws_full_pipeline_caption_agy_tts(stream_app):
     agy_in = [json.loads(l) for l in (tmp / "agy_in.log").read_text().splitlines()]
     assert agy_in[0].startswith("You are Zoth") and "[^" in agy_in[0] and "MISSION: make tea" in agy_in[0]
     assert "SEEN: A kitchen with a red kettle." in agy_in[1]
-    assert any('NEAL: "how long does it take"' in x for x in agy_in)
+    assert any('USER: "how long does it take"' in x for x in agy_in)
     assert sum("red kettle on it" in x for x in agy_in) == 0   # deduped caption never reached AGY
     log = (tmp / "audit.log").read_text()
     assert "how long" not in log and "kettle" not in log
@@ -203,7 +203,7 @@ def test_ws_full_pipeline_caption_agy_tts(stream_app):
 
 def test_ws_barge_in_stops_audio_and_mutes_rest_of_turn(stream_app):
     make, tmp = stream_app
-    # slow turn: Zoth starts a long answer; Neal barges in after the first sentence
+    # slow turn: Zoth starts a long answer; the user barges in after the first sentence
     app = make(["[^Zoth is with you.^]", "[^First sentence here.| Second sentence here.| Third sentence here.^]", "[^Okay, stopping.^]"], delay=0.4)
     with TestClient(app) as c, c.websocket_connect("/v1/guide/stream", headers={"Authorization": f"Bearer {TOK}"}) as ws:
         ws.send_json({"type": "hello", "mission": ""})

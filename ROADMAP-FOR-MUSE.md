@@ -3,7 +3,7 @@
 Solo indie entry. Today ~2026-10-27. Submit by **2026-11-04 6:00 PM ET**
 (hard deadline 9:00 PM). Repo: `NullAITech/nullai-fieldkit`, branch for this
 work, PR opened not merged. Author on commits:
-`Neal Frazier <1nc0gn30@users.noreply.github.com>`.
+`1nc0gn30 <1nc0gn30@users.noreply.github.com>`.
 
 ## What is already shipped (do not rebuild)
 
@@ -34,11 +34,11 @@ work, PR opened not merged. Author on commits:
   DAT (APPLICATION_ID=0 dev mode, Meta AI camera->mic permission chain,
   BT-CONNECT, held-frame flush on connect, SDK diagnostics in status).
 
-## Honest blockers (Neal-owned, not code)
+## Honest blockers (owner-owned, not code)
 
 1. Glasses first frame: needs Meta AI Developer Mode + Spotter listed under
    the glasses' dev apps + glasses on WiFi (Meta AI logs showed
-   `registeredSNApps: []` and `WIFI_NETWORKS_UNREACHABLE`). All taps are Neal's.
+   `registeredSNApps: []` and `WIFI_NETWORKS_UNREACHABLE`). All taps are the owner's.
 2. Relay `:8770` needs one `zoth-vault unlock` after daemon restarts (10-day
    TTL set; do NOT run `daemon restart`).
 3. Pixel must be on USB for Spotter installs.
@@ -49,7 +49,7 @@ work, PR opened not merged. Author on commits:
 
 - **D2 (today)**: land interview/vision/memory planning + held-frame flush
   (this branch). Keep suite green. PR open.
-- **D3**: Spotter glasses first-frame test with Neal (diagnostics line:
+- **D3**: Spotter glasses first-frame test with the owner (diagnostics line:
   `reg/devMode/devices`); 10-min soak + latency check on live relay.
 - **D4**: film 30s internal Mission Mode clip; proactive-coach tuning
   (DEDUP/nag limits, safety wording).

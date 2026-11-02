@@ -3,8 +3,8 @@
 phone -> relay (JSON text frames)
   {"type":"hello","mission":"...","tts":"relay"|"phone"}   first message
   {"type":"frame","image":"<b64 jpeg>"}                    scene-changed glasses frames (phone diffs)
-  {"type":"speech","text":"...","final":true}               Neal's words (phone SpeechRecognizer)
-  {"type":"barge"}                                          Neal started talking: stop audio now
+  {"type":"speech","text":"...","final":true}               User's words (phone SpeechRecognizer)
+  {"type":"barge"}                                          User started talking: stop audio now
   {"type":"mission","text":"..."} / {"type":"bye"}
 relay -> phone
   JSON: ready, caption, say {gen,text,tts}, context {text}, stop_audio {gen}, state, error
@@ -33,11 +33,11 @@ from .guide import CAPTION_OPTIONS, CAPTION_PROMPT, GuideConfig, cpu_temp_c, san
 from .markers import MarkerParser
 from .tts import Tts
 
-PREFIX = """You are Zoth, Neal's take-charge mission coach, speaking into his Ray-Ban Meta glasses.
+PREFIX = """You are Zoth, the user's take-charge mission coach, speaking into his Ray-Ban Meta glasses.
 You LEAD. You decide the next step toward his mission and tell him to do it, without waiting to be asked.
 Updates arrive in this one conversation:
   SEEN: caption of what his camera sees (small local vision model; may be wrong or vague)
-  NEAL: what he said out loud
+  USER: what he said out loud
   TICK: no new direction for a while -> give the next step now
   MISSION / NOTES: his goal and where you are in it
 SPEAKING
@@ -45,11 +45,11 @@ SPEAKING
 - Spoken = direct imperative commands, max ~20 words, at most two short sentences, the most important first. No markdown.
 - Outside the markers (never spoken), keep a terse tracker: STEP <n>: <current step> | DONE: <what he finished> | NEXT: <idea>
 COACHING
-- Reply to every NEAL and every TICK with a spoken directive or answer. Never answer those with SILENT.
+- Reply to every USER and every TICK with a spoken directive or answer. Never answer those with SILENT.
 - For SEEN-only updates, speak only if the scene changed meaningfully for the mission; otherwise reply exactly SILENT.
-- After you give a step, watch SEEN/NEAL for whether he did it; confirm briefly and move to the next step.
+- After you give a step, watch SEEN/USER for whether he did it; confirm briefly and move to the next step.
 - If he has no mission yet, pick a sensible small one from what you see and say it.
-- If NEAL says pause/stop coaching, reply [^Paused.^] and stay SILENT until he speaks again or resumes.
+- If USER says pause/stop coaching, reply [^Paused.^] and stay SILENT until he speaks again or resumes.
 SAFETY (always)
 - Never direct him into traffic, roads, heights, water, fire, machinery or anything dangerous; nothing illegal, harmful, harassing or deceptive.
 - Never identify people by face; refer to them by clothing/position. Respect "no" from other people.
@@ -337,7 +337,7 @@ class Conn:
         if self.spoken_log:
             parts.append("Last said: " + " / ".join(self.spoken_log[-3:]))
         if self.heard_log:
-            parts.append("Neal said: " + " / ".join(self.heard_log[-3:]))
+            parts.append("User said: " + " / ".join(self.heard_log[-3:]))
         if self.last_caption_text:
             parts.append("Last seen: " + self.last_caption_text)
         if self.paused:
@@ -353,7 +353,7 @@ class Conn:
         for ts, c in self.obs:
             lines.append(f"[+{int(ts - self.t0)}s] SEEN: {c}")
         for s in self.speech:
-            lines.append(f'[+{int(now - self.t0)}s] NEAL: "{s}"')
+            lines.append(f'[+{int(now - self.t0)}s] USER: "{s}"')
         if tick and not self.speech:
             lines.append(f"[+{int(now - self.t0)}s] TICK: {int(now - self.last_directive_at)}s since your last directive. Next step?")
         self.obs, self.speech = [], []
