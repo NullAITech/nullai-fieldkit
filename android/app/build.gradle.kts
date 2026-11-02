@@ -11,8 +11,8 @@ android {
         applicationId = "tech.nullai.fieldkit"
         minSdk = 30
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.3.2"
+        versionCode = 15
+        versionName = "0.3.3"
         // Meta Wearables app id. Default "0" = DAT Developer Mode (Meta AI app >
         // glasses > Developer Mode must list Spotter). Override for production
         // with -PmwdatAppId=<id from Wearables Developer Center>. A placeholder
@@ -41,6 +41,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
     androidResources {
         noCompress += listOf("tflite", "task")
     }
@@ -58,7 +63,7 @@ dependencies {
     implementation("com.meta.wearable:mwdat-camera:1.0.1")
     implementation("com.meta.wearable:mwdat-mockdevice:1.0.1")
     // On-device face / hand / object detection (Apache-2.0). Models in assets/models.
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    implementation("com.google.mediapipe:tasks-vision:0.10.35")
 }
 
 // Spotter Presence + map HUD: ship the same JS the /pwa uses (single source
