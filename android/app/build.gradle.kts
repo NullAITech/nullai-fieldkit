@@ -11,7 +11,8 @@ android {
         applicationId = "tech.nullai.fieldkit"
         minSdk = 30
         targetSdk = 34
-        versionCode = 15
+        // DO NOT CHANGE versionCode! Meta DAT dev-mode registration goes stale (devMode=false, glasses refuse stream). Keep at 12.
+        versionCode = 12
         versionName = "0.3.3"
         // Meta Wearables app id. Default "0" = DAT Developer Mode (Meta AI app >
         // glasses > Developer Mode must list Spotter). Override for production
