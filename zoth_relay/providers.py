@@ -34,6 +34,7 @@ import httpx
 from .ask import AskError, AskTarget, build_messages, stream_reply
 
 META_BASE = "https://api.meta.ai/v1"
+SPARK_OPEN_MAX_TOKENS = 1200   # reasoning + answer budget for open-weight Spark
 
 
 @dataclass
@@ -229,6 +230,10 @@ def provider_presets() -> dict[str, Provider]:
             os.environ.get("SPARK_OPEN_BASE_URL", "https://inference.baseten.co/v1"),
             os.environ.get("ZOTH_SPARK_OPEN_MODEL", "meta-models/muse-spark-open-1026"),
             api_key_env="BASETEN_API_KEY",
+            # Spark Open streams reasoning_content that counts against max_tokens
+            # (live Nov 2: 120-265 reasoning tokens even at "minimal"); 300 left
+            # some replies empty, so give the visible answer room.
+            max_tokens=SPARK_OPEN_MAX_TOKENS,
             extra={"reasoning_effort": "minimal"}),
         # Modal: MUSE_OPEN_MODAL_URL is the endpoint, MODAL_API_KEY its key.
         "spark-open-modal": OpenAICompatProvider(
@@ -236,6 +241,7 @@ def provider_presets() -> dict[str, Provider]:
             os.environ.get("MUSE_OPEN_MODAL_URL", ""),
             os.environ.get("ZOTH_SPARK_OPEN_MODEL", "meta-models/muse-spark-open-1026"),
             api_key_env="MODAL_API_KEY",
+            max_tokens=SPARK_OPEN_MAX_TOKENS,
             extra={"reasoning_effort": "minimal"}),
         # Offline fallback: local Ollama OpenAI endpoint, no key.
         "local": OpenAICompatProvider("local", os.environ.get(

@@ -91,3 +91,12 @@ def test_session_forwards_switch_and_keeps_only_fallback_text():
     assert any(m["type"] == "model_switched" for m in out)
     assert s.ctx.history()[-1] == {"role": "assistant", "content": "Fixed."}
     assert s.replay_log[-1]["model"] == "spark-open"
+
+
+def test_spark_open_presets_leave_room_for_reasoning(monkeypatch):
+    from zoth_relay.providers import provider_presets
+    ps = provider_presets()
+    for n in ("spark-open", "spark-open-modal"):
+        assert ps[n].max_tokens >= 1000
+        assert ps[n].model == "meta-models/muse-spark-open-1026"
+    assert ps["spark-open"].base_url == "https://inference.baseten.co/v1"
