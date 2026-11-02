@@ -103,6 +103,7 @@ async def build_replay(session, transport: httpx.AsyncBaseTransport | None = Non
                       "step": e.get("step") or "", "prompt": e.get("prompt") or "",
                       "text": e.get("text") or "", "model": e.get("model"),
                       "model_id": e.get("model_id"), "switched_from": e.get("switched_from"),
+                      "eyes": e.get("source"),
                       "image": image, "boxes": boxes})
     m = session._mission() if hasattr(session, "_mission") else None
     return {"mission": m.goal if m else (getattr(session, "mission", "") or ""),

@@ -103,6 +103,9 @@ class FrameStore:
 FRAMES = FrameStore()
 LAST_SESSIONS: dict[str, "Session"] = {}     # agent name -> last closed session (replay)
 REPLAY_MAX = 24
+EYES_SOURCES = {"phone": "the phone camera", "glasses": "the wearer's Meta glasses (first-person view)",
+                "off": ""}
+DETECTIONS_TTL = 10.0       # seconds a detection summary / in-view list stays fresh
 ACTIVE_SESSIONS: dict[str, "Session"] = {}   # agent name -> live session (for MCP say)
 
 
@@ -171,6 +174,15 @@ class Session:
         self.sound_relative: int | None = None  # degrees rel. to device forward
         self.sound_source = ""
         self.sound_level_db: float | None = None
+        # Nov 2 (hackathon): live eyes switch + on-device detections + people in view.
+        self.eyes_source = "phone"          # "phone" | "glasses" | "off"
+        self.eyes_switched_at: float | None = None
+        self.eyes_switches = 0
+        self.detections: dict | None = None
+        self.detections_at = 0.0
+        self.in_view: list[str] = []        # names the WEARER saved, matched on-device/relay
+        self.in_view_at = 0.0
+        self.heard: str = ""                # saved voice that matched the last utterance
 
     # ------------------------------------------------------------ lifecycle
     def set_hello(self, mission: str, system: str, history_budget=None) -> None:
@@ -208,6 +220,74 @@ class Session:
             return ""
         ctx.focus = ctx.focus or self.focus.observe(speech or "").line()
         return ctx.system_suffix()
+
+    # ------------------------------------------------------------ eyes + detections (Nov 2)
+    def set_eyes(self, source: str) -> bool:
+        """Switch the AI's vision source mid-session. Context, mission and history stay;
+        only the next frames come from somewhere else. Returns True when it changed."""
+        src = source if source in EYES_SOURCES else "phone"
+        if src == self.eyes_source:
+            return False
+        prev, self.eyes_source = self.eyes_source, src
+        self.eyes_switched_at = time.time()
+        self.eyes_switches += 1
+        self._last_hash = None              # the new source's first frame always counts
+        self._pending_frame = None          # never answer about the old source's view
+        self.in_view, self.detections = [], None
+        self._log_replay("eyes", source=src, previous=prev)
+        return True
+
+    def on_detections(self, m: dict) -> dict:
+        """Short on-device detection summary (MediaPipe hands/faces, optional pose/objects).
+        Counts and labels only - never pixels or landmarks - so it is cheap and private."""
+        def _n(k):
+            try:
+                return max(0, min(20, int(m.get(k) or 0)))
+            except (TypeError, ValueError):
+                return 0
+        labels = lambda k: [str(x)[:32] for x in (m.get(k) or []) if isinstance(x, str)][:8]
+        d = {"hands": _n("hands"), "faces": _n("faces"), "gestures": labels("gestures"),
+             "objects": labels("objects"), "pose": bool(m.get("pose")),
+             "source": self.eyes_source}
+        self.detections, self.detections_at = d, time.time()
+        return d
+
+    def set_in_view(self, names: list[str]) -> list[str]:
+        """Names now in view; returns the ones that just appeared (to announce once)."""
+        names = [n for n in dict.fromkeys(names) if n][:6]
+        new = [n for n in names if n not in self.in_view]
+        self.in_view, self.in_view_at = names, time.time()
+        return new
+
+    def vision_suffix(self) -> str:
+        """Eyes source, fresh detections and people in view, for the next turn's system prompt."""
+        now, out = time.time(), []
+        label = EYES_SOURCES.get(self.eyes_source, "")
+        if label:
+            line = f"Vision source: {label}."
+            if self.eyes_switched_at and now - self.eyes_switched_at < 120:
+                line += (" The wearer switched it mid-call; frames now come from here, earlier"
+                         " frames came from the other source.")
+            out.append(line)
+        d = self.detections
+        if d and now - self.detections_at < DETECTIONS_TTL:
+            bits = []
+            if d["hands"]:
+                bits.append(f"{d['hands']} hand(s)" + (f" ({', '.join(d['gestures'])})" if d["gestures"] else ""))
+            if d["faces"]:
+                bits.append(f"{d['faces']} face(s)")
+            if d["pose"]:
+                bits.append("a person's body pose")
+            if d["objects"]:
+                bits.append("objects: " + ", ".join(d["objects"]))
+            if bits:
+                out.append("On-device detections (approximate): " + "; ".join(bits) + ".")
+        if self.in_view and now - self.in_view_at < DETECTIONS_TTL:
+            out.append("People the wearer saved who appear to be in view (on-device match, may be"
+                       " wrong; never assert, never describe faces): " + ", ".join(self.in_view) + ".")
+        if self.heard:
+            out.append(f"The last voice sounded like {self.heard} (saved voice, may be wrong).")
+        return "\n".join(out)
 
     # ------------------------------------------------------------ mission attach (D3)
     def attach_mission(self, store, mission_id: str) -> None:
@@ -484,7 +564,9 @@ class Session:
                "ignored_outside": self.ignored_outside,
                "heading": self.heading, "heading_source": self.heading_source or None,
                "sound_heading": self.sound_heading, "sound_relative": self.sound_relative,
-               "sound_source": self.sound_source or None, "sound_level_db": self.sound_level_db}
+               "sound_source": self.sound_source or None, "sound_level_db": self.sound_level_db,
+               "eyes": self.eyes_source, "eyes_switches": self.eyes_switches,
+               "in_view": self.in_view}
         ms = self.mission_state()
         if ms is not None:
             out["mission"] = ms
@@ -497,6 +579,9 @@ class Session:
         clip, self._pending_clip = self._pending_clip, None
         sys_prompt = self.system or DEFAULT_VOICE_SYSTEM
         live = self.live_suffix(prompt)
+        vis = self.vision_suffix()
+        if vis:
+            live = f"{live}\n{vis}" if live else vis
         if live:
             sys_prompt = f"{sys_prompt}\n\n{live}" if sys_prompt else live
         turn = Turn(prompt=prompt, system=sys_prompt, mission=self._mission_text(),

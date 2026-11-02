@@ -21,11 +21,14 @@ import json
 import math
 import os
 import time
+import base64
 from dataclasses import asdict, dataclass, field
 
 DEFAULT_CAP = 120
 DEFAULT_THRESHOLD = 0.86      # cosine; calibrated on synthetic crops in the Android harness
 DEFAULT_MARGIN = 0.03         # best must beat runner-up by this, else we say "not sure"
+VOICE_THRESHOLD = 0.88       # cosine on the phone's 42-dim VoicePrint (voice/VoicePrint.java)
+THUMB_MAX_B64 = 96_000       # ~70 KB JPEG: a face crop, never a full frame
 DRIFT_ALPHA = 0.25            # slow follow of hair/lighting changes on a CONFIRMED person only
 
 
@@ -41,6 +44,64 @@ def cosine(a, b) -> float:
     return dot / (na * nb)
 
 
+def _fernet(key_path: str | None):
+    """At-rest encryption for the people store when `cryptography` is installed.
+
+    The key is a 0600 file beside the store (same 0700 state dir). That protects a copied or
+    backed-up people.json, not a machine whose user account is already compromised. Without
+    `cryptography` the store stays a 0600 plaintext JSON, exactly as before Nov 2."""
+    if not key_path:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+    except Exception:
+        return None
+    try:
+        if os.path.exists(key_path):
+            with open(key_path, "rb") as fh:
+                key = fh.read().strip()
+        else:
+            parent = os.path.dirname(key_path)
+            if parent:
+                os.makedirs(parent, mode=0o700, exist_ok=True)
+            key = Fernet.generate_key()
+            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(key)
+        return Fernet(key)
+    except Exception:
+        return None
+
+
+def clean_thumb(b64) -> str:
+    """Accept only a small base64 JPEG/PNG/WebP; anything else is dropped, never stored."""
+    if not isinstance(b64, str) or not b64:
+        return ""
+    if "," in b64[:80] and b64.startswith("data:"):
+        b64 = b64.split(",", 1)[1]
+    if len(b64) > THUMB_MAX_B64:
+        return ""
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        return ""
+    if raw[:3] == b"\xff\xd8\xff" or raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[8:12] == b"WEBP":
+        return b64
+    return ""
+
+
+def clean_vector(raw, limit: int = 512) -> list[float] | None:
+    if not isinstance(raw, (list, tuple)) or not raw or len(raw) > limit:
+        return None
+    try:
+        v = [float(x) for x in raw]
+    except (TypeError, ValueError):
+        return None
+    if any(math.isnan(x) or math.isinf(x) for x in v):
+        return None
+    return v
+
+
 @dataclass
 class Person:
     id: str
@@ -52,6 +113,11 @@ class Person:
     first_seen: float = 0.0
     last_seen: float = 0.0
     encounters: int = 0
+    # Nov 2 (hackathon): "remember this person as <name>" on a live call.
+    saved_at: float = 0.0                # when the wearer saved them (the frame's time)
+    thumb: str = ""                      # small JPEG face crop, base64; the frame he saved
+    voice: list[float] = field(default_factory=list)   # optional on-device voice print
+    voice_saved_at: float = 0.0
 
     @property
     def pending(self) -> bool:
@@ -78,6 +144,8 @@ class People:
         self._now = now
         self.records: dict[str, Person] = {}
         self._seq = 0
+        self._fernet = _fernet(f"{self.path}.key" if self.path else None)
+        self.encrypted = self._fernet is not None
         self.load()
 
     # ------------------------------------------------------------------ storage
@@ -85,9 +153,12 @@ class People:
         if not self.path or not os.path.exists(self.path):
             return
         try:
-            with open(self.path, "r", encoding="utf-8") as fh:
-                raw = json.load(fh)
-        except (OSError, ValueError):
+            with open(self.path, "rb") as fh:
+                blob = fh.read()
+            if blob[:1] != b"{" and self._fernet is not None:
+                blob = self._fernet.decrypt(blob)         # encrypted store (Nov 2)
+            raw = json.loads(blob.decode("utf-8"))        # a pre-Nov-2 plaintext store still loads
+        except Exception:
             return
         for d in raw.get("people", []):
             try:
@@ -110,9 +181,12 @@ class People:
             os.makedirs(parent, mode=0o700, exist_ok=True)
         blob = {"version": 1, "people": [asdict(p) for p in self.records.values()]}
         tmp = f"{self.path}.tmp.{os.getpid()}"
+        data = json.dumps(blob, separators=(",", ":")).encode("utf-8")
+        if self._fernet is not None:
+            data = self._fernet.encrypt(data)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(blob, fh, separators=(",", ":"))
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
         os.replace(tmp, self.path)
 
     def prune(self) -> None:
@@ -215,6 +289,97 @@ class People:
         self.records.clear()
         self.save()
         return n
+
+    def save_person(self, name: str, descriptor=None, thumb: str = "", voice=None,
+                    at: float | None = None, relation: str = "", note: str = "") -> Person:
+        """'Remember this person as <name>' from a live call: the wearer's explicit action.
+
+        Binds his name to a face descriptor and/or a voice print, plus the frame crop and the time
+        he saved it. Needs at least one of descriptor/voice - a bare name is never stored."""
+        desc = clean_vector(descriptor)
+        vp = clean_vector(voice, 128)
+        if not desc and not vp:
+            raise ValueError("need a face descriptor or a voice print")
+        at = self._now() if at is None else float(at)
+        if desc:
+            p = self.remember(desc, name, note, relation, at)
+        else:
+            p = self.match_voice(vp)
+            if p is None:
+                self._seq += 1
+                p = Person(id=f"p{self._seq:04d}", first_seen=at, encounters=1)
+                while p.id in self.records:
+                    self._seq += 1
+                    p.id = f"p{self._seq:04d}"
+                self.records[p.id] = p
+            p.name = name.strip()[:80]
+            p.relation = relation.strip()[:80] or p.relation
+            p.last_seen = at
+            if note.strip():
+                p.add_note(note, at)
+        p.saved_at = at
+        t = clean_thumb(thumb)
+        if t:
+            p.thumb = t
+        if vp:
+            p.voice, p.voice_saved_at = vp, at
+        self.save()
+        return p
+
+    def add_voice(self, person_id: str, voice, at: float | None = None) -> Person | None:
+        p = self.records.get(person_id)
+        vp = clean_vector(voice, 128)
+        if p is None or not vp:
+            return None
+        p.voice, p.voice_saved_at = vp, self._now() if at is None else float(at)
+        self.save()
+        return p
+
+    def forget_voice(self, person_id: str) -> bool:
+        p = self.records.get(person_id)
+        if p is None or not p.voice:
+            return False
+        p.voice, p.voice_saved_at = [], 0.0
+        if not p.descriptor:                       # nothing left to bind the name to
+            self.records.pop(person_id, None)
+        self.save()
+        return True
+
+    def rename(self, person_id: str, name: str) -> Person | None:
+        p = self.records.get(person_id)
+        name = (name or "").strip()[:80]
+        if p is None or not name:
+            return None
+        p.name = name
+        self.save()
+        return p
+
+    def match_voice(self, voice, threshold: float = VOICE_THRESHOLD) -> Person | None:
+        """Named people only: a voice match is a hint for the model, never a new identity."""
+        if not voice:
+            return None
+        scored = sorted(((cosine(voice, p.voice), p) for p in self.named() if p.voice),
+                        key=lambda t: t[0], reverse=True)
+        if not scored or scored[0][0] < threshold:
+            return None
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < self.margin:
+            return None
+        return scored[0][1]
+
+    def public(self, person: Person, with_thumb: bool = True) -> dict:
+        """What the People & Voices screen shows. Never the raw vectors."""
+        out = {"id": person.id, "name": person.name, "relation": person.relation,
+               "saved_at": person.saved_at or person.first_seen, "last_seen": person.last_seen,
+               "encounters": person.encounters, "has_face": bool(person.descriptor),
+               "has_voice": bool(person.voice), "voice_saved_at": person.voice_saved_at or None,
+               "notes": person.notes[-3:]}
+        if with_thumb:
+            out["thumb"] = person.thumb or None
+        return out
+
+    def listing(self, with_thumb: bool = True) -> list[dict]:
+        return [self.public(p, with_thumb) for p in
+                sorted(self.named(), key=lambda p: p.saved_at or p.first_seen, reverse=True)]
 
     def pending_ids(self) -> list[str]:
         return [p.id for p in self.records.values() if p.pending]

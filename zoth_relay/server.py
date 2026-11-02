@@ -25,10 +25,26 @@ from .guide_stream import Conn, StreamHub
 from .tts import Tts
 from .config import Agent, Config, load_config
 from .context import TurnContext
-from .people import People
+from .people import People, clean_vector
 from .core import Relay, RelayError
 from .dashboard import DASHBOARD_HTML
 from .openapi_actions import actions_schema
+
+
+# People & Voices (Nov 2)
+class PersonSave(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    descriptor: list[float] | None = None
+    voice: list[float] | None = None
+    thumb: str | None = None
+    at: float | None = None
+    relation: str = ""
+
+class PersonPatch(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+class VoiceSave(BaseModel):
+    voice: list[float]
 
 
 class ExecRequest(BaseModel):
@@ -225,6 +241,27 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             state_dir = os.path.dirname(os.path.expanduser(wd)) or os.path.expanduser("~")
             people = app.state.people = People(os.path.join(state_dir, "people.json"))
         return people
+
+    def people_for(agent, ip):
+        """Same single store; the guide config only picks its directory, so a relay without a
+        `guide:` section still keeps people (under the default state dir)."""
+        try:
+            gcfg = relay.check_guide(agent, ip)
+        except Exception:
+            gcfg = None
+        return people_store(gcfg)
+
+    def match_in_view(store, descriptors) -> list[str]:
+        """Read-only match of on-device face descriptors against people HE saved. Never creates
+        a pending record (detections run every second; sightings are the speech path's job)."""
+        names = []
+        for raw in (descriptors or [])[:6]:
+            v = clean_vector(raw)
+            if v:
+                p, _, _ = store.match(v)
+                if p is not None and not p.pending:
+                    names.append(p.name)
+        return names
 
     def sighting(gcfg, descriptor, person_new=False):
         """Match a bare descriptor from the phone against the people he named himself.
@@ -579,6 +616,71 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         return {"event": ev_name, "say": say, "mission": m.public(),
                 "jot": jot_res, "recap": recap_res}
 
+    # ---------------------------------------------------------- People & Voices (Nov 2)
+    def _people_rest(request, agent):
+        ip = client_ip(request)
+        relay.check_sessions(agent, ip)
+        return people_for(agent, ip), ip
+
+    @app.get("/v1/people", operation_id="listPeople")
+    async def people_list(request: Request, agent: Agent = Depends(auth)):
+        """People & Voices: everyone the wearer saved, with the frame crop and time saved.
+        Local to this relay; never sent anywhere."""
+        store, _ = _people_rest(request, agent)
+        return JSONResponse({"people": store.listing(), "encrypted": store.encrypted},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/people", operation_id="savePerson")
+    async def people_save(request: Request, body: PersonSave, agent: Agent = Depends(auth)):
+        store, ip = _people_rest(request, agent)
+        try:
+            p = store.save_person(body.name, body.descriptor, body.thumb or "", body.voice,
+                                  body.at, body.relation)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        relay.audit.write("people", agent=agent.name, ip=ip, via="rest", result="saved")
+        return store.public(p)
+
+    @app.patch("/v1/people/{person_id}", operation_id="renamePerson")
+    async def people_rename(request: Request, person_id: str, body: PersonPatch,
+                            agent: Agent = Depends(auth)):
+        store, _ = _people_rest(request, agent)
+        p = store.rename(person_id, body.name)
+        if p is None:
+            raise HTTPException(404, "no such person")
+        return store.public(p)
+
+    @app.post("/v1/people/{person_id}/voice", operation_id="savePersonVoice")
+    async def people_voice(request: Request, person_id: str, body: VoiceSave,
+                           agent: Agent = Depends(auth)):
+        store, _ = _people_rest(request, agent)
+        p = store.add_voice(person_id, body.voice)
+        if p is None:
+            raise HTTPException(404, "no such person or empty voice print")
+        return store.public(p)
+
+    @app.delete("/v1/people/{person_id}/voice", operation_id="forgetPersonVoice")
+    async def people_forget_voice(request: Request, person_id: str, agent: Agent = Depends(auth)):
+        store, _ = _people_rest(request, agent)
+        if not store.forget_voice(person_id):
+            raise HTTPException(404, "no saved voice")
+        return {"ok": True}
+
+    @app.delete("/v1/people/{person_id}", operation_id="forgetPerson")
+    async def people_forget(request: Request, person_id: str, agent: Agent = Depends(auth)):
+        store, ip = _people_rest(request, agent)
+        if not store.forget(person_id):
+            raise HTTPException(404, "no such person")
+        relay.audit.write("people", agent=agent.name, ip=ip, via="rest", result="forgot")
+        return {"ok": True}
+
+    @app.delete("/v1/people", operation_id="forgetAllPeople")
+    async def people_forget_all(request: Request, agent: Agent = Depends(auth)):
+        store, ip = _people_rest(request, agent)
+        n = store.clear()
+        relay.audit.write("people", agent=agent.name, ip=ip, via="rest", result="forgot_all", n=n)
+        return {"ok": True, "deleted": n}
+
     @app.get("/v1/sessions/replay", operation_id="sessionReplay")
     async def session_replay(agent: Agent = Depends(auth)):
         """'What it saw': frames used, SAM 3.1 boxes (or labelled stand-in),
@@ -674,6 +776,8 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                        agent_name=agent.name)
         sess.set_hello(str(hello.get("mission") or "")[:2000], str(hello.get("system") or "")[:4000],
                        hello.get("history_budget"))
+        if hello.get("eyes") in ("phone", "glasses", "off"):
+            sess.eyes_source = hello["eyes"]
         mid = str(hello.get("mission_id") or "")
         if mid:
             if missions_store().get(mid) is None:
@@ -711,6 +815,10 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                     sess.on_clip(m["video_url"])
                 elif t == "speech" and isinstance(m.get("text"), str):
                     if m.get("final", True):
+                        vp = clean_vector(m.get("voice_print"), 128)
+                        hp = people_for(agent, ip).match_voice(vp) if vp and \
+                            str(m.get("speaker") or "") != "wearer" else None
+                        sess.heard = hp.name if hp else ""
                         # live context first: speaker, honest command, focus, sighting
                         sess.set_live(ws_ctx(sess, m, agent, ip))
                         await sess.on_user_speech(m["text"][:2000],
@@ -738,6 +846,44 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                 elif t == "sound":
                     sess.on_sound(m.get("heading"), m.get("relative"),
                                   str(m.get("source") or "phone"), m.get("level_db"))
+                elif t == "eyes":
+                    # live eyes switch: same session, same context, new vision source
+                    src = str(m.get("source") or "")
+                    if src in ("phone", "glasses", "off"):
+                        changed = sess.set_eyes(src)
+                        await ws.send_json({"type": "eyes", "source": sess.eyes_source,
+                                            "switched": changed})
+                        await ws.send_json(sess.state())
+                elif t == "detections":
+                    d = sess.on_detections(m)
+                    store = people_for(agent, ip)
+                    names = match_in_view(store, m.get("descriptors"))
+                    if isinstance(m.get("names"), list):        # matched on the phone already
+                        names += [str(n)[:80] for n in m["names"] if isinstance(n, str)
+                                  and any(p.name == n for p in store.named())]
+                    new = sess.set_in_view(names)
+                    if new:
+                        await ws.send_json({"type": "person_in_view", "names": new})
+                    await ws.send_json({"type": "detections", **d, "in_view": sess.in_view})
+                elif t == "remember":
+                    # "remember this person as <name>": the wearer's explicit tap/command only
+                    if str(m.get("speaker") or "wearer") != "wearer":
+                        await ws.send_json({"type": "error", "detail": "only the wearer can save a person"})
+                        continue
+                    name = str(m.get("name") or "").strip()[:80]
+                    try:
+                        if not name:
+                            raise ValueError("need a name")
+                        p = people_for(agent, ip).save_person(
+                            name, m.get("descriptor"), m.get("thumb") or "", m.get("voice"),
+                            m.get("at") if isinstance(m.get("at"), (int, float)) else None)
+                    except ValueError as e:
+                        await ws.send_json({"type": "error", "detail": f"remember: {e}"})
+                        continue
+                    sess.set_in_view(sess.in_view + [p.name])
+                    relay.audit.write("people", agent=agent.name, ip=ip, via="ws", result="saved")
+                    await ws.send_json({"type": "remembered", "id": p.id, "name": p.name,
+                                        "has_face": bool(p.descriptor), "has_voice": bool(p.voice)})
                 elif t == "barge":
                     await sess.barge()
                 elif t == "bye":

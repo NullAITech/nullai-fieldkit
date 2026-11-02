@@ -218,10 +218,11 @@ def test_an_unnamed_sighting_names_nobody(env):
         s = systems[-1]
         assert "no name for them" in s and "came back into view" not in s
         assert "Maya" not in s and "Maya" not in json.dumps(j)
-        blob = json.loads((env["state"] / "people.json").read_text())
-    assert [p["name"] for p in blob["people"]] == [""]   # remembered as a silhouette, not a person
-    assert blob["people"][0]["descriptor"] == FACE_B
-    assert blob["people"][0]["notes"] == []
+        # Read back through the store: since Nov 2 the file is encrypted at rest.
+        recs = list(People(str(env["state"] / "people.json")).records.values())
+    assert [r.name for r in recs] == [""]                # remembered as a silhouette, not a person
+    assert recs[0].descriptor == FACE_B
+    assert recs[0].notes == []
     # The store is his, private, and 0600.
     assert oct((env["state"] / "people.json").stat().st_mode)[-3:] == "600"
 

@@ -118,7 +118,10 @@ def test_persistence_round_trip_is_0600_and_atomic(tmp_path):
     assert [r.name for r in back.named()] == ["Maya"]
     assert back.named()[0].notes == ["has the spare key"]
     assert len(back.pending_ids()) == 1
-    json.loads(path.read_text())                             # must be valid JSON on disk
+    if p.encrypted:                                          # Nov 2: encrypted at rest
+        assert b"Maya" not in path.read_bytes()
+    else:
+        json.loads(path.read_text())                         # plaintext fallback: valid JSON
 
 
 def test_corrupt_store_does_not_crash(tmp_path):
