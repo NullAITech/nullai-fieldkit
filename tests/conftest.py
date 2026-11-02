@@ -10,6 +10,9 @@ import yaml
 _TEST_SANDBOX = Path(os.environ.get("TMPDIR", "/tmp")) / "fieldkit-test-sandbox"
 os.environ.setdefault("FIELDKIT_JOT_DIR", str(_TEST_SANDBOX / "jot"))
 os.environ.setdefault("FIELDKIT_VAULT_DIR", str(_TEST_SANDBOX / "vault"))
+# Goal modes (modes.py): never read/write the operator's real modes file.
+os.environ["ZOTH_MODES_FILE"] = str(_TEST_SANDBOX / "modes.json")
+(_TEST_SANDBOX / "modes.json").unlink(missing_ok=True)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from zoth_relay.config import hash_token, load_config  # noqa: E402
