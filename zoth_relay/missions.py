@@ -172,7 +172,9 @@ async def _complete(provider: Provider, turn: Turn,
         full: list[str] = []
         try:
             async for ev in provider.stream_events(turn, f"m{uuid.uuid4().hex[:8]}", transport):
-                if ev.get("type") == "delta":
+                if ev.get("type") == "model_switched":
+                    full = []  # live failover: drop the primary's partial text
+                elif ev.get("type") == "delta":
                     full.append(ev.get("text", ""))
                 elif ev.get("type") == "error":
                     raise MissionError(ev.get("status", 502), ev.get("detail", "provider error"))

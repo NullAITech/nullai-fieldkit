@@ -67,6 +67,50 @@ class SamHighlighter:
         return out
 
 
+# ------------------------------------------------------------ "what it saw" replay (Nov 2)
+def standin_boxes(step_text: str) -> list[dict]:
+    """Honest placeholder when SAM_API_URL is unset: one centred box, labelled
+    as a stand-in so it is never mistaken for a SAM 3.1 segmentation."""
+    label = f"stand-in (SAM 3.1 not configured): {step_text}"[:60] if step_text \
+        else "stand-in (SAM 3.1 not configured)"
+    return [{"x": 0.3, "y": 0.3, "w": 0.4, "h": 0.4, "label": label, "score": 0.0,
+             "source": "stand-in"}]
+
+
+async def build_replay(session, transport: httpx.AsyncBaseTransport | None = None) -> dict:
+    """Frames the guide used, highlight boxes, the steps it gave, when, and
+    which model answered each one. Built on demand from the session's bounded
+    in-memory log; frames are inlined as data URIs and never written to disk."""
+    sam = SamHighlighter(transport or getattr(session, "transport", None))
+    steps, models = [], []
+    for e in list(getattr(session, "replay_log", [])):
+        frame = e.get("frame")
+        target = e.get("step") or e.get("text") or ""
+        boxes = [dict(b, source=b.get("source", "sam-3.1")) for b in (e.get("boxes") or [])]
+        if frame is not None and not boxes:
+            if sam.configured:
+                boxes = [dict(b, source="sam-3.1") for b in await sam.highlight(frame, target)]
+            else:
+                boxes = standin_boxes(target)
+        image = None
+        if frame is not None:
+            raw, mime = frame
+            image = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+        if e.get("model") and e["model"] not in models:
+            models.append(e["model"])
+        steps.append({"kind": e.get("kind"), "at": e.get("t"),
+                      "offset_s": round(e.get("t", 0) - getattr(session, "started_at", e.get("t", 0)), 1),
+                      "step": e.get("step") or "", "prompt": e.get("prompt") or "",
+                      "text": e.get("text") or "", "model": e.get("model"),
+                      "model_id": e.get("model_id"), "switched_from": e.get("switched_from"),
+                      "image": image, "boxes": boxes})
+    m = session._mission() if hasattr(session, "_mission") else None
+    return {"mission": m.goal if m else (getattr(session, "mission", "") or ""),
+            "started_at": getattr(session, "started_at", None),
+            "sam": "sam-3.1" if sam.configured else "stand-in",
+            "models": models, "steps": steps}
+
+
 # ------------------------------------------------------------ Muse Image recap
 def _prompt(mission) -> str:
     done = [s.text for s in mission.steps if s.status in ("done", "skipped")]

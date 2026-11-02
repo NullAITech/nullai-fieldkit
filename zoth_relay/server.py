@@ -16,8 +16,8 @@ from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
 from . import jot_bridge, recap, second_brain
 from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_interview
-from .providers import configured_providers, presets_public, provider_presets
-from .sessions import ACTIVE_SESSIONS, FRAMES, Session
+from .providers import configured_providers, presets_public, provider_presets, with_failover
+from .sessions import ACTIVE_SESSIONS, FRAMES, LAST_SESSIONS, Session
 from .trio import Advisor, Director, Eyes
 from .live import LiveError, mint_token
 from .guide import AgyConfig, Guide
@@ -430,7 +430,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
     def fieldkit_providers() -> dict:
         ps = getattr(app.state, "session_providers", None)
         if ps is None:
-            ps = app.state.session_providers = provider_presets()
+            ps = app.state.session_providers = with_failover(provider_presets())
         return ps
 
     @app.get("/v1/providers", operation_id="listProviders")
@@ -579,6 +579,15 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         return {"event": ev_name, "say": say, "mission": m.public(),
                 "jot": jot_res, "recap": recap_res}
 
+    @app.get("/v1/sessions/replay", operation_id="sessionReplay")
+    async def session_replay(agent: Agent = Depends(auth)):
+        """'What it saw': frames used, SAM 3.1 boxes (or labelled stand-in),
+        steps given, timestamps, and which model answered each step."""
+        sess = ACTIVE_SESSIONS.get(agent.name) or LAST_SESSIONS.get(agent.name)
+        if sess is None:
+            raise HTTPException(404, "no session to replay yet")
+        return await recap.build_replay(sess)
+
     @app.post("/v1/missions/{mission_id}/recap", operation_id="missionRecap")
     async def mission_recap(request: Request, mission_id: str,
                             agent: Agent = Depends(auth)):
@@ -644,7 +653,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             return
         providers = getattr(app.state, "session_providers", None)
         if providers is None:
-            providers = app.state.session_providers = provider_presets()
+            providers = app.state.session_providers = with_failover(provider_presets())
         name = str(hello.get("provider") or "spark")
         provider = providers.get(name)
         if provider is None:
@@ -738,6 +747,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         finally:
             if ACTIVE_SESSIONS.get(agent.name) is sess:
                 ACTIVE_SESSIONS.pop(agent.name, None)
+            LAST_SESSIONS[agent.name] = sess   # kept (bounded log) for the replay view
             await sess.close()
             relay.audit.write("session", agent=agent.name, ip=ip, via="ws", result="closed",
                               turns=sess.turns, frames=sess.frames_received,

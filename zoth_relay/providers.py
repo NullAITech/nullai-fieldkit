@@ -21,6 +21,7 @@ consume stream_events directly; /v1/ask keeps using ask.py unchanged.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -258,3 +259,89 @@ def presets_public(presets: dict[str, Provider] | None = None) -> list[dict]:
     """Public, key-free view of every preset (configured and not)."""
     ps = presets if presets is not None else provider_presets()
     return [ps[n].public() for n in sorted(ps)]
+
+
+# ------------------------------------------------------------ live failover (Nov 2)
+FAILOVER_PRIMARIES = ("spark", "wonder", "spark-messages", "wonder-messages")
+
+
+class FailoverProvider(Provider):
+    """Primary (Meta Model API) with a live fallback (Spark Open on Baseten).
+
+    If the primary yields an error event, raises, or goes `timeout` seconds
+    without producing its next event, the SAME turn (prompt, history, frame)
+    is re-run on the fallback. A `model_switched` event {from,to,reason} is
+    emitted first so clients drop the partial reply and show a badge; the
+    final done event carries agent=<fallback> and switched_from=<primary>.
+    """
+
+    def __init__(self, primary: Provider, fallback: Provider, timeout: float = 8.0):
+        super().__init__(primary.name, primary.base_url, primary.model, primary.api_key_env,
+                         primary.vision, primary.max_tokens, primary.timeout)
+        self.primary, self.fallback = primary, fallback
+        self.failover_timeout = self.timeout = float(timeout)
+        self.supports_video = primary.supports_video
+        self.transport_kind = primary.transport_kind
+
+    def public(self) -> dict:
+        return {**self.primary.public(), "failover": self.fallback.name,
+                "failover_model": self.fallback.model, "failover_timeout_s": self.failover_timeout}
+
+    async def stream_events(self, turn: Turn, request_id: str,
+                            transport: httpx.AsyncBaseTransport | None = None) -> AsyncIterator[dict]:
+        reason = None
+        agen = self.primary.stream_events(turn, request_id, transport).__aiter__()
+        try:
+            while True:
+                try:
+                    ev = await asyncio.wait_for(agen.__anext__(), self.failover_timeout)
+                except StopAsyncIteration:
+                    return  # primary finished cleanly (done already forwarded)
+                except asyncio.TimeoutError:
+                    reason = "timeout"
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    reason = "error"
+                    break
+                if ev.get("type") == "error":
+                    reason = "error"
+                    break
+                yield ev
+                if ev.get("type") == "done":
+                    return
+        finally:
+            try:
+                await agen.aclose()
+            except Exception:
+                pass
+        yield {"type": "model_switched", "from": self.primary.name, "to": self.fallback.name,
+               "from_model": self.primary.model, "to_model": self.fallback.model,
+               "reason": reason}
+        async for ev in self.fallback.stream_events(turn, request_id, transport):
+            if ev.get("type") == "done":
+                ev = {**ev, "agent": self.fallback.name, "model": self.fallback.model,
+                      "switched_from": self.primary.name}
+            yield ev
+
+
+def with_failover(presets: dict[str, Provider], fallback_name: str = "spark-open") -> dict[str, Provider]:
+    """Wrap the Meta API presets with a live Baseten fallback, if it is configured.
+
+    No-op when BASETEN_API_KEY is absent or ZOTH_FAILOVER=0. Timeout from
+    ZOTH_FAILOVER_TIMEOUT_S (default 8 seconds between stream events)."""
+    fb = presets.get(fallback_name)
+    if (fb is None or not fb.configured or not fb.base_url
+            or os.environ.get("ZOTH_FAILOVER", "1").strip() in ("0", "false", "off")):
+        return presets
+    try:
+        t = float(os.environ.get("ZOTH_FAILOVER_TIMEOUT_S", "8"))
+    except ValueError:
+        t = 8.0
+    out = dict(presets)
+    for n in FAILOVER_PRIMARIES:
+        p = out.get(n)
+        if p is not None and not isinstance(p, FailoverProvider):
+            out[n] = FailoverProvider(p, fb, t)
+    return out

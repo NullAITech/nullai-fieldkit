@@ -101,6 +101,8 @@ class FrameStore:
 
 
 FRAMES = FrameStore()
+LAST_SESSIONS: dict[str, "Session"] = {}     # agent name -> last closed session (replay)
+REPLAY_MAX = 24
 ACTIVE_SESSIONS: dict[str, "Session"] = {}   # agent name -> live session (for MCP say)
 
 
@@ -146,6 +148,8 @@ class Session:
         self.turns = 0
         self.gen = 0
         self.metrics: list[dict] = []
+        self.replay_log: list[dict] = []   # bounded "what it saw" log (in memory only)
+        self.started_at = time.time()
         self._task: asyncio.Task | None = None
         self.closed = False
         # Guide trio (D4): preset desires + proactive Eyes/Advisor/Director.
@@ -349,6 +353,10 @@ class Session:
             if boxes:
                 ev_out["highlight"] = boxes
         await self.send(ev_out)
+        self._log_replay("observation", text=obs.text, model=self._eyes.provider.name
+                         if getattr(self._eyes, "provider", None) else self.provider.name,
+                         model_id=self.provider.model, frame=image,
+                         boxes=ev_out.get("highlight") or [])
         if await self._maybe_advance_mission(obs.text):
             return
         suggestions = await self._advisor.advise(obs, self._mission_text())
@@ -452,6 +460,14 @@ class Session:
             self._task.cancel()
         await self.send({"type": "stop", "gen": self.gen})
 
+    # ------------------------------------------------------------ replay
+    def _log_replay(self, kind: str, **kw) -> None:
+        m = self._mission()
+        step = m.current_step_text if m else ""
+        self.replay_log.append({"kind": kind, "t": time.time(), "step": step or "", **kw})
+        if len(self.replay_log) > REPLAY_MAX:
+            self.replay_log = self.replay_log[-REPLAY_MAX:]
+
     # ------------------------------------------------------------ turns
     def start_turn(self, prompt: str, kind: str = "speech") -> None:
         if self._task and not self._task.done():
@@ -489,6 +505,7 @@ class Session:
         full: list[str] = []
         done_ev: dict | None = None
         spk_buf, spk_n, first_speak_ms = "", 0, None
+        switched: dict | None = None
 
         async def speak(text: str) -> None:
             nonlocal spk_n, first_speak_ms
@@ -501,6 +518,11 @@ class Session:
         try:
             async for ev in self.provider.stream_events(
                     turn, f"s{uuid.uuid4().hex[:8]}", self.transport):
+                if ev.get("type") == "model_switched":
+                    # partial primary reply is dropped; fallback re-answers the turn
+                    full, spk_buf, switched = [], "", ev
+                    self.metrics.append({"kind": "model_switched", "from": ev.get("from"),
+                                         "to": ev.get("to"), "reason": ev.get("reason")})
                 if ev.get("type") == "delta":
                     full.append(ev.get("text", ""))
                 elif ev.get("type") == "done":
@@ -526,6 +548,12 @@ class Session:
         self.ctx.add("user", prompt)
         if done_ev is not None and full:
             self.ctx.add("assistant", "".join(full))
+            fb = getattr(self.provider, "fallback", None) if switched else None
+            self._log_replay("turn", prompt=prompt, text="".join(full),
+                             model=done_ev.get("agent") or (fb.name if fb else self.provider.name),
+                             model_id=done_ev.get("model") or (fb.model if fb else self.provider.model),
+                             switched_from=switched.get("from") if switched else None,
+                             frame=image, ms=done_ev.get("ms"))
         self.metrics.append({"kind": kind,
                              "first_ms": done_ev.get("first_ms") if done_ev else None,
                              "first_speak_ms": first_speak_ms,

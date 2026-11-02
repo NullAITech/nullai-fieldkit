@@ -194,3 +194,23 @@ def test_unconfigured_provider_error_names_available(env):
         assert ev["provider"] == "nokey"
         assert "MISSING_KEY" in ev["missing_env"]   # fixture key env: DEFINITELY_MISSING_KEY
         assert isinstance(ev["available"], list)
+
+
+def test_replay_endpoint_after_session(env, monkeypatch):
+    monkeypatch.delenv("SAM_API_URL", raising=False)
+    assert env["c"].get("/v1/sessions/replay").status_code == 401
+    with env["c"].websocket_connect("/v1/sessions", headers=H(MOB)) as ws:
+        ws.send_json({"type": "hello", "provider": "spark"})
+        ws.receive_json()
+        ws.send_json({"type": "frame", "image": PNG})
+        ws.send_json({"type": "speech", "text": "what now", "final": True})
+        until_done(ws)
+        ws.receive_json()
+        ws.send_json({"type": "bye"})
+    r = env["c"].get("/v1/sessions/replay", headers=H(MOB))
+    assert r.status_code == 200
+    rep = r.json()
+    assert rep["models"] == ["spark"] and rep["sam"] == "stand-in"
+    st = rep["steps"][-1]
+    assert st["text"] == "Go left." and st["image"].startswith("data:image/png")
+    assert st["boxes"][0]["source"] == "stand-in"
