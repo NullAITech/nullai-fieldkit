@@ -1,7 +1,7 @@
 // FieldKit PWA shell cache: page works offline, data always live from the relay.
-const CACHE = "fieldkit-pwa-v1";
+const CACHE = "fieldkit-pwa-v2";
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/pwa", "/pwa/manifest.webmanifest"])));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/pwa", "/pwa/manifest.webmanifest", "/pwa/presence.js", "/pwa/maphud.js"])));
   self.skipWaiting();
 });
 self.addEventListener("fetch", e => {
