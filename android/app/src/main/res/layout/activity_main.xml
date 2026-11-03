@@ -10,85 +10,159 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="20dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Spotter"
-            android:textColor="#111111"
-            android:textSize="28sp"
-            android:textStyle="bold" />
-
+        <!-- 1. Brand Header Row: Title + Braille on Left, Dev Mode Toggle on Right -->
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/brailleWordmark"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:importantForAccessibility="no"
-                android:text="⠎⠏⠕⠞⠞⠑⠗"
-                android:textColor="#6B707B"
-                android:textSize="15sp"
-                android:letterSpacing="0.12" />
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/brailleSpin"
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Spotter"
+                        android:textColor="#0F172A"
+                        android:textSize="28sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/brailleWordmark"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:importantForAccessibility="no"
+                        android:text="⠎⠏⠕⠞⠞⠑⠗"
+                        android:textColor="#64748B"
+                        android:textSize="14sp"
+                        android:letterSpacing="0.10" />
+
+                    <TextView
+                        android:id="@+id/brailleSpin"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:importantForAccessibility="no"
+                        android:text="⠋"
+                        android:textColor="#1E293B"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="FieldKit by NullAI · your mission coach"
+                    android:textColor="#475569"
+                    android:textSize="13.5sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnMainDevToggle"
+                android:contentDescription="Toggle developer and advanced settings"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:importantForAccessibility="no"
-                android:text="⠋"
-                android:textColor="#1E2026"
-                android:textSize="17sp"
+                android:layout_height="38dp"
+                android:minHeight="38dp"
+                android:paddingHorizontal="12dp"
+                android:background="@drawable/bg_btn_light"
+                android:singleLine="true"
+                android:text="⚙ Dev"
+                android:textAllCaps="false"
+                android:textColor="#1E293B"
+                android:textSize="12.5sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- 2. Spacious Quick Utility Bar (CC Captions | Conversations | Record Demo) -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="FieldKit by NullAI · your mission coach"
-            android:textColor="#444444"
-            android:textSize="14sp" />
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/tvCompass"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Heading —"
-            android:textColor="#444444"
-            android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnMainCaptions"
+                android:contentDescription="Toggle live AI captions"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1"
+                android:minHeight="42dp"
+                android:layout_marginEnd="8dp"
+                android:paddingHorizontal="8dp"
+                android:background="@drawable/bg_accent_emerald"
+                android:singleLine="true"
+                android:text="CC: ON"
+                android:textAllCaps="false"
+                android:textColor="#34D399"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/tvSound"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Sound —"
-            android:textColor="#444444"
-            android:textSize="12sp" />
+            <Button
+                android:id="@+id/btnMainChats"
+                android:contentDescription="View or start conversations"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1.15"
+                android:minHeight="42dp"
+                android:layout_marginEnd="8dp"
+                android:paddingHorizontal="8dp"
+                android:background="@drawable/bg_dark_pill"
+                android:singleLine="true"
+                android:text="💬 Chats"
+                android:textAllCaps="false"
+                android:textColor="#7DD3FC"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnRecDemo"
+                android:contentDescription="Record live demo video"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1.15"
+                android:minHeight="42dp"
+                android:paddingHorizontal="8dp"
+                android:background="@drawable/bg_dark_pill"
+                android:singleLine="true"
+                android:text="● REC Demo"
+                android:textAllCaps="false"
+                android:textColor="#FCA5A5"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <tech.nullai.fieldkit.DitherStripView
             android:layout_width="match_parent"
-            android:layout_height="24dp"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp" />
+            android:layout_height="18dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="4dp" />
 
         <tech.nullai.fieldkit.BrailleStripView
             android:layout_width="match_parent"
-            android:layout_height="24dp"
-            android:layout_marginBottom="16dp"
+            android:layout_height="18dp"
+            android:layout_marginBottom="12dp"
             android:importantForAccessibility="no" />
 
+        <!-- 3. Camera Source Selector -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="CAMERA SOURCE"
-            android:textColor="#444444"
+            android:textColor="#475569"
             android:textSize="11sp"
             android:textStyle="bold"
             android:layout_marginBottom="6dp" />
@@ -103,27 +177,36 @@
             <Button
                 android:id="@+id/btnSrcPhone"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="42dp"
                 android:layout_weight="1"
-                android:text="Phone camera"
-                android:textColor="#111111"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:text="Phone Camera"
+                android:textColor="#0F172A"
                 android:background="@drawable/bg_seg_on" />
 
             <Button
                 android:id="@+id/btnSrcGlasses"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="42dp"
                 android:layout_weight="1"
-                android:text="Meta glasses"
-                android:textColor="#111111"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:text="Meta Glasses"
+                android:textColor="#0F172A"
                 android:background="@android:color/transparent" />
         </LinearLayout>
 
+        <!-- 4. Live Camera Viewfinder Card -->
         <FrameLayout
             android:id="@+id/previewCard"
             android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:layout_marginTop="14dp"
+            android:layout_height="215dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card">
 
             <TextureView
@@ -143,20 +226,28 @@
 
             <Button
                 android:id="@+id/btnFull"
-            android:contentDescription="Open full screen preview"
+                android:contentDescription="Open full screen preview"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="36dp"
+                android:minHeight="36dp"
                 android:layout_gravity="top|end"
                 android:layout_margin="8dp"
+                android:paddingHorizontal="12dp"
+                android:background="@drawable/bg_dark_pill"
+                android:textColor="#FFFFFF"
+                android:textAllCaps="false"
+                android:textSize="12sp"
                 android:text="⛶ Full" />
 
             <Button
                 android:id="@+id/btnFab"
-            android:contentDescription="Open Spotter options menu"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
+                android:contentDescription="Open Spotter options menu"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
                 android:layout_gravity="bottom|end"
                 android:layout_margin="12dp"
+                android:background="@drawable/bg_dark_pill"
+                android:textColor="#FFFFFF"
                 android:text="☰"
                 android:textSize="20sp"
                 android:visibility="gone" />
@@ -169,8 +260,23 @@
                 android:padding="20dp"
                 android:text="Meta glasses\nWaiting for the first real frame…"
                 android:textAlignment="center"
-                android:textColor="#333333"
+                android:textColor="#1E293B"
                 android:textSize="14sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvRecBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_margin="8dp"
+                android:background="@drawable/bg_dark_pill"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:text="● REC 00:00"
+                android:textColor="#FCA5A5"
+                android:textSize="11sp"
+                android:textStyle="bold"
                 android:visibility="gone" />
 
             <TextView
@@ -179,42 +285,84 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="bottom|start"
                 android:layout_margin="8dp"
-                android:background="@drawable/bg_pill"
-                android:paddingHorizontal="8dp"
+                android:background="@drawable/bg_dark_pill"
+                android:paddingHorizontal="10dp"
                 android:paddingVertical="4dp"
                 android:text="Stream idle"
-                android:textColor="#111111"
-                android:textSize="10sp" />
+                android:textColor="#F8FAFC"
+                android:textSize="10.5sp" />
         </FrameLayout>
 
+        <!-- 5. Live AI Model / Agent Captions Banner -->
+        <TextView
+            android:id="@+id/tvMainLiveCaptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_dark_card"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="10dp"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="13.5sp"
+            android:lineSpacingExtra="2dp"
+            android:visibility="gone" />
+
+        <!-- 6. Live Recognized Person Character Card Popup (4 angles + detailed info chart) -->
+        <LinearLayout
+            android:id="@+id/mainPersonCardOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
+        <!-- 7. Current Step & Status Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:background="@drawable/bg_card"
-            android:padding="18dp"
-            android:layout_marginTop="14dp">
+            android:padding="16dp"
+            android:layout_marginTop="12dp">
 
-            <tech.nullai.fieldkit.DitherStripView
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="14dp"
-                android:layout_marginBottom="10dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="CURRENT STEP"
-                android:textColor="#444444"
-                android:textSize="11sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="CURRENT STEP"
+                    android:textColor="#475569"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnConnect"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:minHeight="34dp"
+                    android:paddingHorizontal="14dp"
+                    android:singleLine="true"
+                    android:textAllCaps="false"
+                    android:textStyle="bold"
+                    android:textSize="12sp"
+                    android:text="Connect"
+                    android:textColor="#FFFFFF"
+                    android:background="@drawable/bg_btn_dark" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tvStep"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="No mission yet"
-                android:textColor="#111111"
-                android:textSize="21sp"
+                android:textColor="#0F172A"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:layout_marginTop="4dp" />
 
@@ -222,90 +370,63 @@
                 android:id="@+id/tvStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Scan the relay code, or enter it below."
-                android:textColor="#444444"
+                android:text="Enter a goal below or start a live Muse call."
+                android:textColor="#334155"
                 android:textSize="13sp"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="4dp" />
         </LinearLayout>
 
-        <Button
-            android:id="@+id/btnScan"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Scan QR to connect"
-            android:textColor="#FFFFFF"
-            android:background="@drawable/bg_btn_dark"
-            android:layout_marginTop="16dp" />
-
-        <EditText
-            android:id="@+id/etRelay"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Relay address"
-            android:textColor="#111111"
-            android:textColorHint="#888888"
-            android:background="@drawable/bg_input"
-            android:inputType="textUri"
-            android:singleLine="true"
-            android:layout_marginTop="12dp" />
-
-        <EditText
-            android:id="@+id/etToken"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Relay token"
-            android:textColor="#111111"
-            android:textColorHint="#888888"
-            android:background="@drawable/bg_input"
-            android:inputType="textPassword"
-            android:singleLine="true"
-            android:layout_marginTop="8dp" />
-
-        <Button
-            android:id="@+id/btnConnect"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Connect"
-            android:textColor="#111111"
-            android:background="@drawable/bg_btn_light"
-            android:layout_marginTop="10dp" />
-
+        <!-- 8. Mission Goal Input + Start + Demo Goals -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="18dp">
+            android:gravity="center_vertical"
+            android:layout_marginTop="12dp">
 
             <EditText
                 android:id="@+id/etGoal"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="46dp"
                 android:layout_weight="1"
-                android:hint="Goal — replace the air filter"
-                android:textColor="#111111"
-                android:textColorHint="#888888"
+                android:paddingHorizontal="14dp"
+                android:hint="What do you want help with?"
+                android:textColor="#0F172A"
+                android:textColorHint="#64748B"
+                android:textSize="14sp"
                 android:background="@drawable/bg_input"
                 android:singleLine="true" />
 
             <Button
                 android:id="@+id/btnMission"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="46dp"
+                android:paddingHorizontal="16dp"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13.5sp"
                 android:text="▶ Start"
                 android:textColor="#FFFFFF"
                 android:background="@drawable/bg_btn_dark"
                 android:layout_marginStart="8dp" />
+
+            <Button
+                android:id="@+id/btnDemoGoals"
+                android:layout_width="wrap_content"
+                android:layout_height="46dp"
+                android:layout_marginStart="6dp"
+                android:paddingHorizontal="12dp"
+                android:singleLine="true"
+                android:text="⚡ Ideas"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:textColor="#0F172A"
+                android:background="@drawable/bg_btn_light" />
         </LinearLayout>
 
-        <Button
-            android:id="@+id/btnPreset"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Preset: Get It Done"
-            android:textColor="#111111"
-            android:background="@drawable/bg_btn_light"
-            android:layout_marginTop="10dp" />
-
+        <!-- 9. Everyday Action Row 1: Talk | Pause | Next Step (No wrapping or clipping!) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -314,83 +435,252 @@
 
             <Button
                 android:id="@+id/btnTalk"
-                android:minHeight="48dp"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
                 android:text="◉ Talk"
-                android:textColor="#111111"
+                android:textColor="#0F172A"
                 android:background="@drawable/bg_btn_light" />
 
             <Button
                 android:id="@+id/btnShh"
-                android:minHeight="48dp"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="⏸ Shh"
-                android:textColor="#111111"
-                android:background="@drawable/bg_btn_light"
-                android:layout_marginStart="8dp" />
+                android:layout_height="48dp"
+                android:layout_weight="0.9"
+                android:layout_marginStart="8dp"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:text="⏸ Pause"
+                android:textColor="#0F172A"
+                android:background="@drawable/bg_btn_light" />
 
             <Button
                 android:id="@+id/btnNext"
-                android:minHeight="48dp"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="✔ Done — next step"
+                android:layout_height="48dp"
+                android:layout_weight="1.15"
+                android:layout_marginStart="8dp"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:text="✔ Next Step"
                 android:textColor="#FFFFFF"
-                android:background="@drawable/bg_btn_dark"
-                android:layout_marginStart="8dp" />
+                android:background="@drawable/bg_btn_dark" />
         </LinearLayout>
 
+        <!-- 10. Everyday Action Row 2: Live Muse Call | Save Person | Saved People -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="10dp">
-
-            <Button
-                android:id="@+id/btnVoice"
-                android:minHeight="48dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="&#9678; Voice"
-                android:textColor="#111111"
-                android:background="@drawable/bg_btn_light" />
+            android:layout_marginTop="8dp">
 
             <Button
                 android:id="@+id/btnCall"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:minHeight="48dp"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1.1"
                 android:background="@drawable/bg_btn_dark"
-                android:text="&#9743; Call"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:text="☎ Live Call"
                 android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnPerson"
-                android:minHeight="48dp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1.15"
                 android:layout_marginStart="8dp"
-                android:text="&#9670; Name"
-                android:textColor="#111111"
+                android:singleLine="true"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:text="◆ Save Person"
+                android:textColor="#0F172A"
                 android:background="@drawable/bg_btn_light" />
 
-            <TextView
-                android:id="@+id/tvVoice"
+            <Button
+                android:id="@+id/btnMainPeople"
                 android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="0.95"
+                android:layout_marginStart="8dp"
+                android:singleLine="true"
+                android:text="People"
+                android:textAllCaps="false"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:textColor="#0F172A"
+                android:background="@drawable/bg_btn_light" />
+        </LinearLayout>
+
+        <!-- 11. Collapsible Developer & Advanced Controls Drawer -->
+        <LinearLayout
+            android:id="@+id/devControlsCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:id="@+id/tvDevDrawerHeader"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="10dp"
-                android:textSize="11sp"
-                android:textColor="#E8F0F5"
-                android:alpha="0.85"
-                android:gravity="center_vertical"
-                android:text="&#9674; Voice gate: not enrolled. Tap Voice to teach it yours (3 takes)." />
+                android:fontFamily="monospace"
+                android:text="▸ Developer &amp; Advanced Settings (Relay, Voice Gate, Sensors)"
+                android:textColor="#334155"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/devControlsBody"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SENSOR &amp; ACOUSTIC TELEMETRY"
+                    android:textColor="#475569"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvCompass"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="monospace"
+                    android:text="Heading —"
+                    android:textColor="#0F172A"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvSound"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Sound —"
+                    android:textColor="#0F172A"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="COACH OPTIMIZATION &amp; SPEAKER GATE"
+                    android:textColor="#475569"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnPreset"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:singleLine="true"
+                        android:text="Preset: Get It Done"
+                        android:textAllCaps="false"
+                        android:textStyle="bold"
+                        android:textSize="12.5sp"
+                        android:textColor="#0F172A"
+                        android:background="@drawable/bg_btn_light" />
+
+                    <Button
+                        android:id="@+id/btnVoice"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="8dp"
+                        android:paddingHorizontal="14dp"
+                        android:singleLine="true"
+                        android:textAllCaps="false"
+                        android:textStyle="bold"
+                        android:textSize="12.5sp"
+                        android:text="◎ Voice Gate"
+                        android:textColor="#0F172A"
+                        android:background="@drawable/bg_btn_light" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvVoice"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textSize="11.5sp"
+                    android:textColor="#334155"
+                    android:text="◎ Voice gate: not enrolled. Tap Voice Gate to teach it yours (3 takes)." />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="RELAY SERVER &amp; PAIRING"
+                    android:textColor="#475569"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnScan"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="6dp"
+                    android:singleLine="true"
+                    android:textAllCaps="false"
+                    android:textStyle="bold"
+                    android:textSize="13sp"
+                    android:text="Scan QR to Pair Relay"
+                    android:textColor="#FFFFFF"
+                    android:background="@drawable/bg_btn_dark" />
+
+                <EditText
+                    android:id="@+id/etRelay"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="8dp"
+                    android:paddingHorizontal="12dp"
+                    android:hint="Relay address (http://...)"
+                    android:textColor="#0F172A"
+                    android:textColorHint="#64748B"
+                    android:textSize="13.5sp"
+                    android:background="@drawable/bg_input"
+                    android:inputType="textUri"
+                    android:singleLine="true" />
+
+                <EditText
+                    android:id="@+id/etToken"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="8dp"
+                    android:paddingHorizontal="12dp"
+                    android:hint="Relay token"
+                    android:textColor="#0F172A"
+                    android:textColorHint="#64748B"
+                    android:textSize="13.5sp"
+                    android:background="@drawable/bg_input"
+                    android:inputType="textPassword"
+                    android:singleLine="true" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

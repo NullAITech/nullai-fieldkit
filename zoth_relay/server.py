@@ -1018,12 +1018,17 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
     @app.get("/pwa/presence.js", include_in_schema=False)
     async def pwa_presence():
         return HTMLResponse((_pwa / "presence.js").read_text(encoding="utf-8"),
-                            media_type="application/javascript")
+                            media_type="application/javascript; charset=utf-8")
 
     @app.get("/pwa/maphud.js", include_in_schema=False)
     async def pwa_maphud():
         return HTMLResponse((_pwa / "maphud.js").read_text(encoding="utf-8"),
-                            media_type="application/javascript")
+                            media_type="application/javascript; charset=utf-8")
+
+    @app.get("/pwa/slides", include_in_schema=False)
+    @app.get("/pwa/slides.html", include_in_schema=False)
+    async def pwa_slides():
+        return HTMLResponse((_pwa / "slides.html").read_text(encoding="utf-8"))
 
     @app.exception_handler(RelayError)
     async def _relay_err(_, exc: RelayError):

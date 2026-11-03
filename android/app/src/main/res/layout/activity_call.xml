@@ -3,38 +3,122 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#0B0C10"
+    android:background="#090D14"
     android:fitsSystemWindows="true"
-    android:padding="12dp">
+    android:padding="14dp">
 
+    <!-- Top Full-Width High-Contrast Call Status Bar -->
     <TextView
         android:id="@+id/tvCallState"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_pill"
-        android:padding="10dp"
-        android:textColor="#E8EEF7"
+        android:background="@drawable/bg_dark_card"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
         android:textSize="14sp"
+        android:singleLine="true"
+        android:ellipsize="end"
         android:text="Opening a live Muse session…" />
 
+    <!-- Second Row: Spacious Quick Utility Bar (CC Captions | Chats | REC | Dev) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnCallCaptions"
+            android:contentDescription="Toggle live AI captions"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:minHeight="40dp"
+            android:layout_marginEnd="6dp"
+            android:paddingHorizontal="6dp"
+            android:background="@drawable/bg_accent_emerald"
+            android:singleLine="true"
+            android:text="CC: ON"
+            android:textAllCaps="false"
+            android:textColor="#34D399"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnCallChats"
+            android:contentDescription="View or start conversations"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1.1"
+            android:minHeight="40dp"
+            android:layout_marginEnd="6dp"
+            android:paddingHorizontal="6dp"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:text="💬 Chats"
+            android:textAllCaps="false"
+            android:textColor="#7DD3FC"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnCallRec"
+            android:contentDescription="Record live demo video"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1.1"
+            android:minHeight="40dp"
+            android:layout_marginEnd="6dp"
+            android:paddingHorizontal="6dp"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:text="● REC"
+            android:textAllCaps="false"
+            android:textColor="#FCA5A5"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnCallDev"
+            android:contentDescription="Toggle developer telemetry"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="0.9"
+            android:minHeight="40dp"
+            android:paddingHorizontal="6dp"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:text="⚙ Dev"
+            android:textAllCaps="false"
+            android:textColor="#CBD5E1"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Collapsible Developer Audio / Vision Telemetry Bar (hidden by default for everyday users) -->
     <TextView
         android:id="@+id/tvCallMeter"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:background="@drawable/bg_pill"
-        android:padding="8dp"
+        android:background="@drawable/bg_dark_subcard"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
         android:fontFamily="monospace"
-        android:textColor="#9FB3C8"
+        android:textColor="#94A3B8"
         android:textSize="11sp"
+        android:visibility="gone"
         android:text="mic —  ·  session not open" />
 
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="10dp"
-        android:layout_marginBottom="10dp">
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp">
 
         <tech.nullai.fieldkit.avatar.Muse2DView
             android:id="@+id/muse2d"
@@ -47,14 +131,17 @@
             android:layout_height="match_parent"
             android:visibility="gone" />
 
-        <!-- Nov 2: what the eyes see + on-device detection boxes (toggle: Detect) -->
+        <!-- Live POV preview (glasses or phone cam) + optional detection boxes; tap to expand/shrink -->
         <ImageView
             android:id="@+id/ivEyesPreview"
-            android:layout_width="120dp"
-            android:layout_height="160dp"
+            android:contentDescription="Live POV preview — tap to expand or shrink"
+            android:layout_width="148dp"
+            android:layout_height="196dp"
             android:layout_gravity="top|start"
+            android:layout_margin="6dp"
+            android:padding="3dp"
             android:scaleType="fitCenter"
-            android:background="#99000000"
+            android:background="@drawable/bg_dark_subcard"
             android:visibility="gone" />
 
         <TextView
@@ -62,10 +149,12 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|start"
-            android:background="@drawable/bg_pill"
-            android:padding="6dp"
+            android:layout_marginBottom="64dp"
+            android:background="@drawable/bg_dark_card"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="6dp"
             android:fontFamily="monospace"
-            android:textColor="#8FE3B0"
+            android:textColor="#34D399"
             android:textSize="11sp"
             android:visibility="gone" />
 
@@ -76,68 +165,115 @@
             android:layout_gravity="top|end"
             android:layout_margin="6dp"
             android:visibility="gone" />
+
+        <!-- Live Recognized Person Character Card Popup (4 angles + biometric & sighting info chart) -->
+        <LinearLayout
+            android:id="@+id/personCardOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_margin="6dp"
+            android:orientation="vertical"
+            android:elevation="10dp"
+            android:visibility="gone" />
+
+        <!-- Live AI Model / Agent Closed Captions Overlay -->
+        <TextView
+            android:id="@+id/tvLiveCaptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_margin="6dp"
+            android:background="@drawable/bg_dark_card"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="10dp"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:lineSpacingExtra="2dp"
+            android:maxLines="4"
+            android:elevation="8dp"
+            android:visibility="gone" />
     </FrameLayout>
 
+    <!-- High-Contrast Transcript Log Box -->
     <TextView
         android:id="@+id/tvCallLog"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_pill"
-        android:padding="10dp"
-        android:maxLines="5"
-        android:textColor="#C9D6E8"
-        android:textSize="12sp" />
+        android:background="@drawable/bg_dark_card"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp"
+        android:minLines="2"
+        android:maxLines="4"
+        android:textColor="#F1F5F9"
+        android:textSize="12.5sp"
+        android:text="Speak naturally — live captions &amp; transcript appear here." />
 
+    <!-- Primary Call Controls -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="8dp"
         android:orientation="horizontal">
 
         <Button
             android:id="@+id/btnMute"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="46dp"
             android:layout_weight="1"
-            android:minHeight="48dp"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
-            android:text="Mic on" />
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="12.5sp"
+            android:textColor="#FFFFFF"
+            android:text="Mic On" />
 
         <Button
             android:id="@+id/btnEyes"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="46dp"
             android:layout_weight="1"
-            android:minHeight="48dp"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
-            android:text="Eyes off" />
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="12.5sp"
+            android:textColor="#FFFFFF"
+            android:text="Eyes Off" />
 
         <Button
             android:id="@+id/btnAvatar"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="48dp"
+            android:layout_height="46dp"
+            android:layout_weight="0.8"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="12.5sp"
+            android:textColor="#7DD3FC"
             android:text="3D" />
 
         <Button
             android:id="@+id/btnHangUp"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="48dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#FF9B9B"
-            android:text="Hang up" />
+            android:layout_height="46dp"
+            android:layout_weight="1.1"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="12.5sp"
+            android:textColor="#FCA5A5"
+            android:text="Hang Up" />
     </LinearLayout>
 
+    <!-- Secondary Camera & People Controls -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -147,52 +283,55 @@
         <Button
             android:id="@+id/btnSource"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="44dp"
             android:layout_weight="1"
-            android:minHeight="44dp"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
+            android:background="@drawable/bg_dark_pill"
+            android:textColor="#FFFFFF"
+            android:singleLine="true"
             android:textAllCaps="false"
+            android:textStyle="bold"
             android:textSize="12sp"
             android:text="Phone cam" />
 
         <Button
             android:id="@+id/btnRemember"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="44dp"
+            android:layout_height="44dp"
+            android:layout_weight="1.15"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
+            android:background="@drawable/bg_accent_emerald"
+            android:textColor="#34D399"
+            android:singleLine="true"
             android:textAllCaps="false"
+            android:textStyle="bold"
             android:textSize="12sp"
-            android:text="Remember" />
+            android:text="◆ Save Person" />
 
         <Button
             android:id="@+id/btnDetect"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="44dp"
             android:layout_weight="1"
-            android:minHeight="44dp"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
+            android:background="@drawable/bg_dark_pill"
+            android:textColor="#CBD5E1"
+            android:singleLine="true"
             android:textAllCaps="false"
+            android:textStyle="bold"
             android:textSize="12sp"
-            android:text="Detect off" />
+            android:text="Detect Off" />
 
         <Button
             android:id="@+id/btnPeople"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="44dp"
-            
-            android:background="@drawable/bg_btn_dark"
-            android:textColor="#E8EEF7"
+            android:layout_height="44dp"
+            android:layout_weight="0.9"
+            android:background="@drawable/bg_dark_pill"
+            android:textColor="#FFFFFF"
+            android:singleLine="true"
             android:textAllCaps="false"
+            android:textStyle="bold"
             android:textSize="12sp"
             android:text="People" />
     </LinearLayout>

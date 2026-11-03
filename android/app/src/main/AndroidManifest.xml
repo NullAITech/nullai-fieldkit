@@ -69,6 +69,12 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Conversations & Live Captions Hub -->
+        <activity
+            android:name=".ConversationsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

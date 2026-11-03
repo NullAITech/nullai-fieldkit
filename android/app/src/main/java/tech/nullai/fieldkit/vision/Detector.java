@@ -41,16 +41,20 @@ public final class Detector implements AutoCloseable {
 
     public static final class Result {
         public final List<RectF> faces = new ArrayList<>();       // pixel boxes in the frame
+        public final List<RectF> bodies = new ArrayList<>();      // full/upper body person boxes
         public final List<Hand> hands = new ArrayList<>();
         public final List<String> objects = new ArrayList<>();
         public final List<RectF> objectBoxes = new ArrayList<>();
         public int width, height;
         public long ms;
 
-        /** e.g. "1 face, 2 hands (open palm), objects: cup, laptop" — counts and labels only. */
+        /** e.g. "1 face, 1 body, 2 hands (open palm), objects: cup, laptop" — counts and labels only. */
         public String summary() {
             StringBuilder b = new StringBuilder();
             b.append(faces.size()).append(faces.size() == 1 ? " face" : " faces");
+            if (!bodies.isEmpty()) {
+                b.append(", ").append(bodies.size()).append(bodies.size() == 1 ? " body" : " bodies");
+            }
             b.append(", ").append(hands.size()).append(hands.size() == 1 ? " hand" : " hands");
             List<String> g = gestures();
             if (!g.isEmpty()) b.append(" (").append(String.join(", ", g)).append(")");
@@ -62,6 +66,10 @@ public final class Detector implements AutoCloseable {
             List<String> g = new ArrayList<>();
             for (Hand h : hands) if (!h.gesture.isEmpty()) g.add(h.gesture.replace('_', ' '));
             return g;
+        }
+
+        public static RectF findMatchingBody(RectF face, List<RectF> bodies) {
+            return Detector.findMatchingBody(face, bodies);
         }
     }
 
@@ -125,14 +133,60 @@ public final class Detector implements AutoCloseable {
                     List<Category> c = d.categories();
                     if (c.isEmpty()) continue;
                     String name = c.get(0).categoryName();
-                    if ("person".equals(name)) continue;          // faces already cover people
+                    if ("person".equals(name)) {
+                        res.bodies.add(new RectF(d.boundingBox()));
+                        continue;
+                    }
                     if (!res.objects.contains(name)) res.objects.add(name);
                     res.objectBoxes.add(new RectF(d.boundingBox()));
                 }
             } catch (Throwable t) { Log.w(TAG, "object detect failed: " + t); }
         }
+        // Ensure every detected face also has a corresponding body/torso box if EfficientDet missed close-up torso
+        for (RectF f : res.faces) {
+            if (findMatchingBody(f, res.bodies) == null) {
+                res.bodies.add(estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), f));
+            }
+        }
         res.ms = System.currentTimeMillis() - t0;
         return res;
+    }
+
+    /** Finds the detected person body box that best encloses or aligns with the given face box. */
+    public static RectF findMatchingBody(RectF face, List<RectF> bodies) {
+        if (face == null || bodies == null) return null;
+        float fcx = face.centerX();
+        float fcy = face.centerY();
+        RectF best = null;
+        float bestArea = 0f;
+        for (RectF b : bodies) {
+            if (fcx >= b.left - face.width() * 0.5f && fcx <= b.right + face.width() * 0.5f
+                    && fcy >= b.top - face.height() * 0.5f && fcy <= b.bottom) {
+                float area = b.width() * b.height();
+                if (area > bestArea) {
+                    bestArea = area;
+                    best = b;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Estimates upper/full body torso box anchored beneath a detected face box. */
+    public static RectF estimateBodyFromFace(int imgW, int imgH, RectF face) {
+        if (face == null) return new RectF(0, 0, imgW, imgH);
+        float cx = face.centerX();
+        float fw = face.width();
+        float fh = face.height();
+        float left = Math.max(0f, cx - fw * 1.75f);
+        float right = Math.min((float) imgW, cx + fw * 1.75f);
+        float top = Math.max(0f, face.bottom - fh * 0.15f);
+        float bottom = Math.min((float) imgH, face.bottom + fh * 3.4f);
+        if (bottom - top < fh * 0.8f) {
+            top = Math.max(0f, face.top);
+            bottom = imgH;
+        }
+        return new RectF(left, top, right, bottom);
     }
 
     @Override public void close() {

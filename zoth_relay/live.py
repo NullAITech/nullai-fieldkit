@@ -102,6 +102,7 @@ def build_setup(cfg: LiveConfig, mission: str = "", voice: str = "") -> dict:
     if speech:
         gen["speechConfig"] = speech
     return {"model": f"models/{cfg.model}", "generationConfig": gen, "sessionResumption": {},
+            "outputAudioTranscription": {}, "inputAudioTranscription": {},
             "systemInstruction": {"parts": [{"text": system}]}}
 
 

@@ -46,10 +46,14 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import tech.nullai.fieldkit.people.CharacterBoard;
+import tech.nullai.fieldkit.people.PeopleVault;
 import tech.nullai.fieldkit.people.PersonDescriptor;
+import tech.nullai.fieldkit.vision.Detector;
 import tech.nullai.fieldkit.voice.LockedListener;
 import tech.nullai.fieldkit.voice.OwnerPrintStore;
 import tech.nullai.fieldkit.voice.OwnerPrintPrefs;
@@ -98,6 +102,34 @@ public class MainActivity extends Activity {
     private static final int REQ_PERMS = 7;
     private static final int REQ_SPEECH = 9;
     private static final int REQ_DAT_CAM = 4101;   // Meta AI glasses camera permission
+    private static final int REQ_CHATS = 4202;     // Conversations history & new session view
+
+    private Button btnMainCaptions, btnMainChats;
+    private TextView tvMainLiveCaptions;
+    private LinearLayout mainPersonCardOverlay;
+    private boolean captionsEnabled = true;
+    private String activeConvId = "";
+    private final Handler mainUiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable hideMainCaptionsTask = () -> {
+        if (tvMainLiveCaptions != null) tvMainLiveCaptions.setVisibility(View.GONE);
+    };
+    private volatile byte[] lastMainJpeg;
+    private final ArrayDeque<Bitmap> mainRollingFrames = new ArrayDeque<>(4);
+    private volatile RectF lastMainFaceBox;
+    private volatile RectF lastMainBodyBox;
+    private Detector mainDetector;
+    private volatile boolean mainVisionBusy = false;
+    private long lastMainVisionAt = 0L;
+    private String mainDismissedPersonId = "";
+    private long mainDismissedUntil = 0L;
+    private String mainActivePopupPersonId = "";
+    private long mainActivePopupUpdatedAt = 0L;
+    private final java.util.concurrent.ExecutorService mainVisionExec =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "main-vision");
+                t.setDaemon(true);
+                return t;
+            });
 
     // ---- voice gate + appearance descriptor (voice/VoiceCapture, people/PersonDescriptor)
     /** SharedPreferences key holding the enrolled takes. A convenience gate, never a password. */
@@ -123,10 +155,10 @@ public class MainActivity extends Activity {
     private int pendingTotal = 0;
 
     private EditText etRelay, etToken, etGoal;
-    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvSound;
+    private TextView tvStep, tvStatus, tvGlasses, tvCompass, tvSound, tvRecBadge;
     private TextureView preview;
     private ImageView ivGlasses;
-    private Button btnConnect, btnSrcPhone, btnSrcGlasses, btnFab, btnFull, btnPreset;
+    private Button btnConnect, btnSrcPhone, btnSrcGlasses, btnFab, btnFull, btnPreset, btnRecDemo, btnDemoGoals;
     private boolean glassesMode = false;
     private boolean fullscreen = false;
     private byte[] pendingGlassesFrame = null;
@@ -181,6 +213,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setShowWhenLocked(true);
+        setTurnScreenOn(true);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
 
@@ -254,6 +288,68 @@ public class MainActivity extends Activity {
         btnFull = findViewById(R.id.btnFull);
         btnFull.setOnClickListener(v -> setFullscreen(true));
         btnFab.setOnClickListener(v -> showOptionsMenu());
+        btnRecDemo = findViewById(R.id.btnRecDemo);
+        tvRecBadge = findViewById(R.id.tvRecBadge);
+        btnDemoGoals = findViewById(R.id.btnDemoGoals);
+        btnMainCaptions = findViewById(R.id.btnMainCaptions);
+        btnMainChats = findViewById(R.id.btnMainChats);
+        tvMainLiveCaptions = findViewById(R.id.tvMainLiveCaptions);
+        mainPersonCardOverlay = findViewById(R.id.mainPersonCardOverlay);
+
+        ConversationStore convStore = ConversationStore.get(this);
+        captionsEnabled = convStore.isCaptionsEnabled();
+        activeConvId = convStore.getActiveOrCreate("Mission Coach", "mission").id;
+        updateMainCaptionsButtonUi();
+
+        if (btnMainCaptions != null) {
+            btnMainCaptions.setOnClickListener(v -> {
+                captionsEnabled = !captionsEnabled;
+                ConversationStore.get(this).setCaptionsEnabled(captionsEnabled);
+                updateMainCaptionsButtonUi();
+                if (!captionsEnabled && tvMainLiveCaptions != null) {
+                    tvMainLiveCaptions.setVisibility(View.GONE);
+                } else if (captionsEnabled) {
+                    showMainLiveCaption("🔊 LIVE CAPTIONS ENABLED — Coach & Agent speech subtitles active");
+                }
+            });
+        }
+        if (btnMainChats != null) {
+            btnMainChats.setOnClickListener(v ->
+                    startActivityForResult(new Intent(this, ConversationsActivity.class), REQ_CHATS));
+        }
+        View btnMainPeople = findViewById(R.id.btnMainPeople);
+        if (btnMainPeople != null) {
+            btnMainPeople.setOnClickListener(v ->
+                    startActivity(new Intent(this, PeopleActivity.class)));
+        }
+        final Button btnMainDevToggle = findViewById(R.id.btnMainDevToggle);
+        final TextView tvDevDrawerHeader = findViewById(R.id.tvDevDrawerHeader);
+        final View devControlsBody = findViewById(R.id.devControlsBody);
+        final Runnable toggleDevDrawer = () -> {
+            if (devControlsBody == null) return;
+            boolean show = devControlsBody.getVisibility() != View.VISIBLE;
+            devControlsBody.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (tvDevDrawerHeader != null) {
+                tvDevDrawerHeader.setText((show ? "▾ " : "▸ ")
+                        + "Developer & Advanced Settings (Relay, Voice Gate, Sensors)");
+            }
+            if (btnMainDevToggle != null) {
+                btnMainDevToggle.setText(show ? "⚙ Dev: ON" : "⚙ Dev");
+                btnMainDevToggle.setTextColor(show ? 0xFFFFFFFF : 0xFF1E293B);
+                btnMainDevToggle.setBackgroundResource(show ? R.drawable.bg_btn_dark : R.drawable.bg_btn_light);
+            }
+        };
+        if (btnMainDevToggle != null) btnMainDevToggle.setOnClickListener(v -> toggleDevDrawer.run());
+        if (tvDevDrawerHeader != null) tvDevDrawerHeader.setOnClickListener(v -> toggleDevDrawer.run());
+        if (btnRecDemo != null) {
+            btnRecDemo.setOnClickListener(v -> DemoRecorder.get().toggle(this));
+        }
+        if (tvRecBadge != null) {
+            tvRecBadge.setOnClickListener(v -> DemoRecorder.get().toggle(this));
+        }
+        if (btnDemoGoals != null) {
+            btnDemoGoals.setOnClickListener(v -> showDemoGoalsPicker());
+        }
         btnPreset = findViewById(R.id.btnPreset);
         btnPreset.setOnClickListener(v -> {
             presetIdx = (presetIdx + 1) % PRESETS.length;
@@ -311,6 +407,9 @@ public class MainActivity extends Activity {
 
             @Override public void onJpeg(byte[] jpeg) {
                 long captureAt = System.currentTimeMillis();
+                lastMainJpeg = jpeg;
+                DemoRecorder.get().onJpegFrame(jpeg, true);
+                onMainCameraJpeg(jpeg, true);
                 // The old path decoded the full 1280x720 frame on the UI thread
                 // and then gated sending at 450 ms, so the relay always showed a
                 // half-second-old picture and the screen stuttered with it.
@@ -408,6 +507,15 @@ public class MainActivity extends Activity {
         if (intent != null && intent.hasExtra("glasses")) {
             setSource(intent.getBooleanExtra("glasses", false));
         }
+        if (intent != null && intent.hasExtra("record_demo")) {
+            boolean rec = intent.getBooleanExtra("record_demo", false);
+            intent.removeExtra("record_demo");
+            if (rec && !DemoRecorder.get().isRecording()) {
+                DemoRecorder.get().start(this);
+            } else if (!rec && DemoRecorder.get().isRecording()) {
+                DemoRecorder.get().stop(this);
+            }
+        }
     }
 
     /**
@@ -457,15 +565,54 @@ public class MainActivity extends Activity {
     }
 
     private void status(String s) {
-        runOnUiThread(() -> tvStatus.setText(s));
+        runOnUiThread(() -> {
+            tvStatus.setText(s);
+            syncDemoHud();
+        });
         // Mirror the headset-free status line into the ongoing notification so a session
         // running with the screen off is still legible from the lock screen.
         if (SpotterService.isAlive()) SpotterService.update(this, s);
     }
 
+    private void syncDemoHud() {
+        DemoRecorder.get().updateHud(
+                glassesMode,
+                false,
+                tvStep != null ? tvStep.getText().toString() : "",
+                tvStatus != null ? tvStatus.getText().toString() : "",
+                tvStream != null ? tvStream.getText().toString() : "",
+                (tvCompass != null ? tvCompass.getText().toString() : "")
+                        + (tvSound != null ? "  ·  " + tvSound.getText().toString() : ""),
+                PRESETS[presetIdx][1]
+        );
+    }
+
+    private void updateMainCaptionsButtonUi() {
+        if (btnMainCaptions == null) return;
+        btnMainCaptions.setText(captionsEnabled ? "CC: ON" : "CC: OFF");
+        btnMainCaptions.setTextColor(captionsEnabled ? 0xFF34D399 : 0xFF94A3B8);
+        btnMainCaptions.setBackgroundResource(captionsEnabled ? R.drawable.bg_accent_emerald : R.drawable.bg_dark_pill);
+    }
+
+    private void showMainLiveCaption(String line) {
+        if (!captionsEnabled || tvMainLiveCaptions == null || line == null || line.trim().isEmpty()) return;
+        runOnUiThread(() -> {
+            tvMainLiveCaptions.setText(line);
+            tvMainLiveCaptions.setVisibility(View.VISIBLE);
+            mainUiHandler.removeCallbacks(hideMainCaptionsTask);
+            mainUiHandler.postDelayed(hideMainCaptionsTask, 9000);
+        });
+    }
+
     private void speak(String s) {
-        if (s != null && !s.trim().isEmpty() && tts != null) {
-            tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "fk");
+        if (s != null && !s.trim().isEmpty()) {
+            String clean = s.trim();
+            DemoRecorder.get().logCue("COACH", clean);
+            showMainLiveCaption("🔊 COACH AI: " + clean);
+            ConversationStore.get(this).appendMessage(activeConvId, "Coach", clean);
+            if (tts != null) {
+                tts.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "fk");
+            }
         }
     }
 
@@ -528,7 +675,10 @@ public class MainActivity extends Activity {
                         status("Switched model: " + ev.optString("from") + " \u2192 "
                                 + ev.optString("to") + " (" + ev.optString("reason") + ")");
                     } else if ("observation".equals(type)) {
-                        status("Eyes: " + ev.optString("text"));
+                        String obs = ev.optString("text");
+                        status("Eyes: " + obs);
+                        showMainLiveCaption("👁️ VISION AGENT: " + obs);
+                        ConversationStore.get(MainActivity.this).appendMessage(activeConvId, "Vision", obs);
                     } else if ("state".equals(type) && ev.has("mission")) {
                         JSONObject m = ev.getJSONObject("mission");
                         String label = m.optBoolean("complete")
@@ -814,7 +964,11 @@ public class MainActivity extends Activity {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
             ViewGroup col = (ViewGroup) content;
-            for (int i = 0; i < col.getChildCount(); i++) col.getChildAt(i).setVisibility(View.VISIBLE);
+            for (int i = 0; i < col.getChildCount(); i++) {
+                View ch = col.getChildAt(i);
+                if (ch.getId() == R.id.tvMainLiveCaptions || ch.getId() == R.id.mainPersonCardOverlay) continue;
+                ch.setVisibility(View.VISIBLE);
+            }
             ViewGroup.LayoutParams lp = card.getLayoutParams();
             lp.height = (int) (200 * getResources().getDisplayMetrics().density);
             card.setLayoutParams(lp);
@@ -824,8 +978,44 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final String[][] DEMO_GOALS = new String[][]{
+            {"Inspect workbench clamp & align assembly",
+                    "Inspect the workbench clamp and guide me step by step to align and tighten the assembly"},
+            {"Replace HVAC air filter & verify airflow arrow",
+                    "Replace the air filter and verify the airflow arrow orientation before closing the housing"},
+            {"Audit network rack cabling & check link LEDs",
+                    "Audit the network rack cabling, verify port connections, and check link status LEDs"},
+            {"Diagnose breadboard & PCB jumper wiring",
+                    "Inspect the breadboard and PCB jumper wiring and verify power rail connections"},
+            {"Prepare pour-over coffee with bloom timer",
+                    "Coach me through brewing a pour-over coffee step by step including filter rinse and bloom"},
+            {"Inventory field kit hardware to Second Brain",
+                    "Identify each tool on the desk and log a structured field inventory note"}
+    };
+
+    private void showDemoGoalsPicker() {
+        String[] labels = new String[DEMO_GOALS.length];
+        for (int i = 0; i < DEMO_GOALS.length; i++) {
+            labels[i] = (i + 1) + ". " + DEMO_GOALS[i][0];
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("⚡ Hackathon Demo Missions")
+                .setItems(labels, (d, which) -> {
+                    String goal = DEMO_GOALS[which][1];
+                    etGoal.setText(goal);
+                    DemoRecorder.get().logCue("GOAL_PRESET", goal);
+                    status("Selected demo goal: " + DEMO_GOALS[which][0] + ". Tap ▶ Start to plan.");
+                })
+                .setNeutralButton(DemoRecorder.get().isRecording() ? "■ Stop Demo Rec" : "● Start Demo Rec",
+                        (d, w) -> DemoRecorder.get().toggle(MainActivity.this))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private void showOptionsMenu() {
         String[] items = new String[]{
+                DemoRecorder.get().isRecording() ? "■ Stop recording live demo (" + DemoRecorder.get().currentButtonLabel() + ")" : "● Record live demo video (MP4 + Cue Sheet)",
+                "⚡ Pick a Hackathon Demo Mission Goal",
                 "Exit full screen",
                 "Camera source: " + (glassesMode ? "Meta glasses" : "Phone camera") + " (switch)",
                 "Model preset: " + PRESETS[presetIdx][1] + " (next)",
@@ -839,14 +1029,16 @@ public class MainActivity extends Activity {
                 .setTitle("Spotter options")
                 .setItems(items, (d, which) -> {
                     switch (which) {
-                        case 0: setFullscreen(false); break;
-                        case 1: setSource(!glassesMode); break;
-                        case 2: if (btnPreset != null) btnPreset.performClick(); break;
-                        case 3: connectToggle(); break;
-                        case 4: DatGlasses.INSTANCE.register(MainActivity.this); break;
-                        case 5: findViewById(R.id.btnShh).performClick(); break;
-                        case 6: showModePicker(); break;
-                        case 7: {
+                        case 0: DemoRecorder.get().toggle(MainActivity.this); break;
+                        case 1: showDemoGoalsPicker(); break;
+                        case 2: setFullscreen(false); break;
+                        case 3: setSource(!glassesMode); break;
+                        case 4: if (btnPreset != null) btnPreset.performClick(); break;
+                        case 5: connectToggle(); break;
+                        case 6: DatGlasses.INSTANCE.register(MainActivity.this); break;
+                        case 7: findViewById(R.id.btnShh).performClick(); break;
+                        case 8: showModePicker(); break;
+                        case 9: {
                             SharedPreferences sp = getSharedPreferences("fieldkit", MODE_PRIVATE);
                             boolean on = !sp.getBoolean("map_hud", false);
                             sp.edit().putBoolean("map_hud", on).apply();
@@ -1007,54 +1199,223 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The wearer types a name for the person in frame. The ONLY way a name ever enters memory.
-     *
-     * Nothing here looks at a face. The name exists because he typed it, it is bound to the
-     * descriptor the camera just saw, and the relay will only ever use it to greet that person the
-     * way he asked. A stranger stays a stranger until he says otherwise. */
+    private Detector getMainDetector() {
+        if (mainDetector == null) mainDetector = new Detector(this);
+        return mainDetector;
+    }
+
+    private void pushMainRollingFrame(Bitmap bmp) {
+        if (bmp == null) return;
+        synchronized (mainRollingFrames) {
+            if (mainRollingFrames.size() >= 4) mainRollingFrames.removeFirst();
+            mainRollingFrames.addLast(bmp);
+        }
+    }
+
+    private List<Bitmap> snapshotMainRollingFrames() {
+        synchronized (mainRollingFrames) {
+            return new ArrayList<>(mainRollingFrames);
+        }
+    }
+
+    private void onMainCameraJpeg(byte[] jpeg, boolean fromGlasses) {
+        if (jpeg == null || jpeg.length == 0) return;
+        long now = System.currentTimeMillis();
+        if (mainVisionBusy || now - lastMainVisionAt < 1100) return;
+        lastMainVisionAt = now;
+        mainVisionBusy = true;
+        mainVisionExec.execute(() -> {
+            try {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inSampleSize = 2;
+                Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
+                if (bmp == null) return;
+                pushMainRollingFrame(bmp);
+
+                PeopleVault vault = PeopleVault.get(MainActivity.this);
+                Detector.Result r = getMainDetector().detect(bmp, !vault.isEmpty(), false);
+                RectF primaryFace = null;
+                for (RectF f : r.faces) {
+                    if (primaryFace == null || f.width() * f.height() > primaryFace.width() * primaryFace.height()) {
+                        primaryFace = f;
+                    }
+                }
+                if (primaryFace != null) {
+                    lastMainFaceBox = new RectF(primaryFace);
+                    RectF bBox = Detector.Result.findMatchingBody(primaryFace, r.bodies);
+                    if (bBox == null) bBox = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), primaryFace);
+                    lastMainBodyBox = new RectF(bBox);
+                    float[] fVec = mainFaceDesc(bmp, primaryFace);
+                    if (fVec != null) {
+                        cropDesc = fVec;
+                        cropDescAt = System.currentTimeMillis();
+                    }
+                }
+
+                if (!vault.isEmpty() && !r.faces.isEmpty()) {
+                    PeopleVault.RecognitionMatch bestMatch = null;
+                    for (RectF f : r.faces) {
+                        float[] fVec = mainFaceDesc(bmp, f);
+                        RectF bBox = Detector.Result.findMatchingBody(f, r.bodies);
+                        if (bBox == null) bBox = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), f);
+                        float[] bVec = mainBodyDesc(bmp, bBox);
+                        PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(fVec, bVec);
+                        if (m != null && m.person != null && (bestMatch == null || m.score > bestMatch.score)) {
+                            bestMatch = m;
+                        }
+                    }
+                    if (bestMatch != null && bestMatch.person != null) {
+                        vault.recordSighting(bestMatch.person.id, bestMatch.score,
+                                fromGlasses ? "Glasses Spotter HUD" : "Phone Spotter HUD");
+                    }
+                    final PeopleVault.RecognitionMatch matchUi = bestMatch;
+                    runOnUiThread(() -> updateMainRecognitionPopup(matchUi));
+                } else {
+                    runOnUiThread(() -> updateMainRecognitionPopup(null));
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                mainVisionBusy = false;
+            }
+        });
+    }
+
+    private static float[] mainFaceDesc(Bitmap bmp, RectF f) {
+        if (bmp == null || f == null) return null;
+        float pw = f.width() * 0.2f, ph = f.height() * 0.2f;
+        int x0 = Math.max(0, (int) (f.left - pw));
+        int y0 = Math.max(0, (int) (f.top - ph));
+        int x1 = Math.min(bmp.getWidth(), (int) (f.right + pw));
+        int y1 = Math.min(bmp.getHeight(), (int) (f.bottom + ph));
+        int w = x1 - x0, h = y1 - y0;
+        if (w < 8 || h < 8) return null;
+        int[] px = new int[w * h];
+        bmp.getPixels(px, 0, w, x0, y0, w, h);
+        return PersonDescriptor.fromCrop(px, w, h);
+    }
+
+    private static float[] mainBodyDesc(Bitmap bmp, RectF b) {
+        if (bmp == null || b == null) return null;
+        float pw = b.width() * 0.05f, ph = b.height() * 0.05f;
+        int x0 = Math.max(0, (int) (b.left - pw));
+        int y0 = Math.max(0, (int) (b.top - ph));
+        int x1 = Math.min(bmp.getWidth(), (int) (b.right + pw));
+        int y1 = Math.min(bmp.getHeight(), (int) (b.bottom + ph));
+        int w = x1 - x0, h = y1 - y0;
+        if (w < 8 || h < 8) return null;
+        int[] px = new int[w * h];
+        bmp.getPixels(px, 0, w, x0, y0, w, h);
+        return PersonDescriptor.fromBodyCrop(px, w, h);
+    }
+
+    private void updateMainRecognitionPopup(PeopleVault.RecognitionMatch match) {
+        if (mainPersonCardOverlay == null) return;
+        long now = System.currentTimeMillis();
+        if (match == null || match.person == null) {
+            if (mainPersonCardOverlay.getVisibility() == View.VISIBLE && now - mainActivePopupUpdatedAt > 6500) {
+                mainPersonCardOverlay.setVisibility(View.GONE);
+                mainActivePopupPersonId = "";
+            }
+            return;
+        }
+        PeopleVault.Person p = match.person;
+        if (p.id.equals(mainDismissedPersonId) && now < mainDismissedUntil) return;
+        mainActivePopupUpdatedAt = now;
+        if (p.id.equals(mainActivePopupPersonId) && mainPersonCardOverlay.getVisibility() == View.VISIBLE) {
+            return;
+        }
+        mainActivePopupPersonId = p.id;
+        CharacterBoard.populateRecognitionCard(
+                this,
+                mainPersonCardOverlay,
+                p,
+                match.score,
+                match.faceScore,
+                match.bodyScore,
+                () -> {
+                    mainDismissedPersonId = p.id;
+                    mainDismissedUntil = System.currentTimeMillis() + 30_000L;
+                    mainPersonCardOverlay.setVisibility(View.GONE);
+                    mainActivePopupPersonId = "";
+                },
+                () -> CharacterBoard.showFullDossierDialog(this, p, () -> {
+                    mainActivePopupPersonId = "";
+                    updateMainRecognitionPopup(match);
+                })
+        );
+        mainPersonCardOverlay.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Opens the 4-Angle Face + Body Character Board builder dialog so the wearer can save
+     * the person in frame with 4 angles, attire/posture telemetry, role, and notes.
+     */
     private void personTap() {
-        final float[] d = cropDesc;
-        if (d == null || System.currentTimeMillis() - cropDescAt > 30000) {
-            Toast.makeText(this, "Aim the camera at them first, then name them.",
+        final byte[] jpeg = lastMainJpeg;
+        if (jpeg == null && snapshotMainRollingFrames().isEmpty()) {
+            Toast.makeText(this, "Aim the camera at them first, then tap ◆ Name.",
                     Toast.LENGTH_SHORT).show();
             return;
         }
-        final EditText field = new EditText(this);
-        field.setHint("their name, as you know it");
-        field.setSingleLine(true);
-        field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        new AlertDialog.Builder(this)
-                .setTitle("Remember this person")
-                .setMessage("Spotter never works anyone out from their face. A name exists only "
-                        + "because you typed it, and it is only used to greet them the way you asked.")
-                .setView(field)
-                .setPositiveButton("Remember", (dlg, w) -> {
-                    String name = field.getText().toString().trim();
-                    if (name.isEmpty()) {
-                        return;
+        mainVisionExec.execute(() -> {
+            Bitmap bmp = null;
+            if (jpeg != null) {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inSampleSize = 2;
+                bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
+                if (bmp != null) pushMainRollingFrame(bmp);
+            }
+            List<Bitmap> frames = snapshotMainRollingFrames();
+            if (bmp == null && !frames.isEmpty()) {
+                bmp = frames.get(frames.size() - 1);
+            }
+            if (bmp == null) return;
+            Detector.Result r = getMainDetector().detect(bmp, true, false);
+            RectF bestFace = null;
+            for (RectF f : r.faces) {
+                if (bestFace == null || f.width() * f.height() > bestFace.width() * bestFace.height()) {
+                    bestFace = f;
+                }
+            }
+            if (bestFace == null) bestFace = lastMainFaceBox;
+            RectF bestBody = bestFace != null
+                    ? Detector.Result.findMatchingBody(bestFace, r.bodies)
+                    : (!r.bodies.isEmpty() ? r.bodies.get(0) : lastMainBodyBox);
+            if (bestBody == null && bestFace != null) {
+                bestBody = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), bestFace);
+            }
+            final Bitmap primary = bmp;
+            final RectF fBox = bestFace;
+            final RectF bBox = bestBody;
+            runOnUiThread(() -> CharacterBoard.showSavePersonDialog(
+                    this,
+                    frames,
+                    primary,
+                    fBox,
+                    bBox,
+                    glassesMode ? "Glasses Spotter HUD" : "Phone Spotter HUD",
+                    saved -> {
+                        etGoal.setText(saved.name);
+                        try {
+                            JSONObject msg = new JSONObject();
+                            msg.put("type", "speech");
+                            msg.put("text", "remember this person: " + saved.name);
+                            msg.put("final", true);
+                            msg.put("speaker", "wearer");
+                            msg.put("command", "person_enroll");
+                            msg.put("name", saved.name);
+                            JSONArray arr = new JSONArray();
+                            for (float f : saved.face) arr.put((double) f);
+                            msg.put("descriptor", arr);
+                            sendWs(msg);
+                        } catch (Exception ignored) { }
+                        ConversationStore.get(this).appendMessage(activeConvId, "Vision",
+                                "Saved 4-Angle Character Board: " + saved.name + " [" + saved.role + "] · " + saved.attire);
+                        updateMainRecognitionPopup(new PeopleVault.RecognitionMatch(saved, 0.99, 0.99, 0.99));
+                        status("Saved Character Board for " + saved.name + " [" + saved.role + "] — " + saved.attire);
                     }
-                    etGoal.setText(name);
-                    try {
-                        JSONObject msg = new JSONObject();
-                        msg.put("type", "speech");
-                        msg.put("text", "remember this person: " + name);
-                        msg.put("final", true);
-                        msg.put("speaker", "wearer");
-                        msg.put("command", "person_enroll");
-                        msg.put("name", name);
-                        JSONArray arr = new JSONArray();
-                        for (float f : d) {
-                            arr.put((double) f);
-                        }
-                        msg.put("descriptor", arr);
-                        sendWs(msg);
-                    } catch (Exception ignored) {
-                    }
-                    status("Remembered as " + name + " \u2014 only your own words can do that.");
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+            ));
+        });
     }
 
     private void voiceTap() {
@@ -1198,6 +1559,26 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
+        if (code == REQ_CHATS) {
+            captionsEnabled = ConversationStore.get(this).isCaptionsEnabled();
+            updateMainCaptionsButtonUi();
+            if (result == RESULT_OK && data != null) {
+                String action = data.getStringExtra(ConversationsActivity.EXTRA_ACTION);
+                String convId = data.getStringExtra(ConversationsActivity.EXTRA_CONV_ID);
+                if (convId != null) activeConvId = convId;
+                if (ConversationsActivity.ACTION_NEW_CALL.equals(action)) {
+                    startCall();
+                } else if (ConversationsActivity.ACTION_NEW_CHAT.equals(action)) {
+                    missionId = "";
+                    pendingMissionId = "";
+                    etGoal.setText("");
+                    tvStep.setText("New conversation ready");
+                    status("Started a new Mission Chat conversation. Enter or say a goal.");
+                    showMainLiveCaption("✨ Started new conversation thread");
+                }
+            }
+            return;
+        }
         DatGlasses.INSTANCE.forceDevMode(this);
         DatGlasses.INSTANCE.handleIntent(data);
         if (code == 0 && glassesMode) {
@@ -1278,6 +1659,8 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
             if (kept == null) {
                 status("Heard (" + lastSpeaker + "): " + text);
+                showMainLiveCaption("🎙️ YOU: " + text);
+                ConversationStore.get(this).appendMessage(activeConvId, "You", text);
             } else {
                 keptBeingTranscribed = null;
                 LockedListener.discard(kept);
@@ -1369,11 +1752,19 @@ public class MainActivity extends Activity {
                 Image img = r.acquireLatestImage();
                 if (img == null) return;
                 try {
-                    if (!connected || glassesMode || frameRelay == null) return;
+                    if (glassesMode) return;
                     java.nio.ByteBuffer buf = img.getPlanes()[0].getBuffer();
                     byte[] jpeg = new byte[buf.remaining()];
                     buf.get(jpeg);
-                    frameRelay.submit("phone", jpeg, img.getWidth(), img.getHeight(), System.currentTimeMillis());
+                    lastMainJpeg = jpeg;
+                    onMainCameraJpeg(jpeg, false);
+                    boolean needDemo = DemoRecorder.get().isRecording();
+                    if (needDemo) {
+                        DemoRecorder.get().onJpegFrame(jpeg, false);
+                    }
+                    if (connected && frameRelay != null) {
+                        frameRelay.submit("phone", jpeg, img.getWidth(), img.getHeight(), System.currentTimeMillis());
+                    }
                 } catch (Exception ignored) {
                 } finally {
                     img.close();
@@ -1701,6 +2092,7 @@ public class MainActivity extends Activity {
     /** FrameRelay stats: shows the measured rate and pipeline cost on screen. */
     private void streamStats(final String text) {
         if (tvStream != null) tvStream.setText(text);
+        syncDemoHud();
         // Mirrored to logcat (adb logcat -s StreamStats:I) so stream quality and
         // pipeline cost can be read without the screen.
         Log.i("StreamStats", text);
@@ -1712,10 +2104,18 @@ public class MainActivity extends Activity {
             status("A call is already live — hang up first.");
             return;
         }
+        // Release phone camera and SoundField mic so CallActivity owns mic + camera cleanly
+        if (soundField != null) soundField.stop();
+        closeCamera();
+        savePrefs();
         Intent i = new Intent(this, CallActivity.class);
         i.putExtra(CallActivity.EXTRA_RELAY, etRelay.getText().toString().trim());
         i.putExtra(CallActivity.EXTRA_TOKEN, etToken.getText().toString().trim());
-        if (glassesMode) i.putExtra(CallActivity.EXTRA_ON_GLASSES, true);
+        boolean useGlasses = glassesMode || DatGlasses.INSTANCE.isStreaming();
+        if (useGlasses) {
+            i.putExtra(CallActivity.EXTRA_ON_GLASSES, true);
+            i.putExtra(CallActivity.EXTRA_EYES, true);
+        }
         startActivity(i);
     }
 
@@ -1843,6 +2243,28 @@ public class MainActivity extends Activity {
     @Override protected void onResume() {
         DatGlasses.INSTANCE.attachActivity(this);
         super.onResume();
+        captionsEnabled = ConversationStore.get(this).isCaptionsEnabled();
+        updateMainCaptionsButtonUi();
+        DemoRecorder.get().setUiListener((recording, label) -> {
+            if (btnRecDemo != null) {
+                btnRecDemo.setText(label);
+                btnRecDemo.setTextColor(recording ? 0xFFFF5252 : 0xFFFF8A8A);
+            }
+            if (tvRecBadge != null) {
+                tvRecBadge.setVisibility(recording ? View.VISIBLE : View.GONE);
+                tvRecBadge.setText(label.replace("■", "● REC"));
+            }
+        });
+        syncDemoHud();
+        if (getIntent() != null && getIntent().hasExtra("record_demo")) {
+            boolean rec = getIntent().getBooleanExtra("record_demo", false);
+            getIntent().removeExtra("record_demo");
+            if (rec && !DemoRecorder.get().isRecording()) {
+                DemoRecorder.get().start(this);
+            } else if (!rec && DemoRecorder.get().isRecording()) {
+                DemoRecorder.get().stop(this);
+            }
+        }
         // One microphone, and the screen-on path gets it: the service stops reading while
         // the app is in front so the Talk button's one-shot capture can open the device.
         SpotterService.setListening(this, false);
@@ -1911,9 +2333,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        mainUiHandler.removeCallbacks(hideMainCaptionsTask);
         closeCamera();
         DatGlasses.INSTANCE.disconnect();
         disconnect();
+        if (mainDetector != null) mainDetector.close();
         if (tts != null) tts.shutdown();
         super.onDestroy();
     }

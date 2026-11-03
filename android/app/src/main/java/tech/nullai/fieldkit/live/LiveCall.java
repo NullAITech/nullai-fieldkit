@@ -94,6 +94,8 @@ public final class LiveCall {
     private int levelUpdates;
     private volatile float micLevel;
     private volatile long uplinkChunks, downlinkChunks, videoFrames;
+    private final StringBuilder museTurnBuf = new StringBuilder();
+    private final StringBuilder userTurnBuf = new StringBuilder();
 
     public LiveCall(String relayBase, String agentToken, Listener listener) {
         this.relayBase = relayBase;
@@ -436,16 +438,36 @@ public final class LiveCall {
                         main.post(() -> listener.onLevel(true, lvl));
                     }
                     String t = p.optString("text", "");
-                    if (!t.isEmpty()) main.post(() -> listener.onText(t, false));
+                    if (!t.isEmpty()) {
+                        museTurnBuf.append(t);
+                        final String cur = museTurnBuf.toString().trim();
+                        main.post(() -> listener.onText(cur, false));
+                    }
                 }
             }
-            if (sc.optBoolean("turnComplete", false)) {
-                main.post(() -> listener.onLevel(true, 0f));
+            JSONObject ot = sc.optJSONObject("outputTranscription");
+            if (ot != null && ot.has("text")) {
+                String t = ot.optString("text", "");
+                if (!t.isEmpty()) {
+                    museTurnBuf.append(t);
+                    final String cur = museTurnBuf.toString().trim();
+                    main.post(() -> listener.onText(cur, false));
+                }
             }
             JSONObject it = sc.optJSONObject("inputTranscription");
             if (it != null && it.has("text")) {
                 String t = it.optString("text", "");
-                if (!t.isEmpty()) main.post(() -> listener.onText(t, true));
+                if (!t.isEmpty()) {
+                    userTurnBuf.append(t);
+                    final String cur = userTurnBuf.toString().trim();
+                    main.post(() -> listener.onText(cur, true));
+                    userTurnBuf.setLength(0);
+                }
+            }
+            if (sc.optBoolean("turnComplete", false) || sc.optBoolean("interrupted", false)) {
+                museTurnBuf.setLength(0);
+                userTurnBuf.setLength(0);
+                main.post(() -> listener.onLevel(true, 0f));
             }
         } catch (Exception e) {
             Log.w(TAG, "frame parse: " + e.getMessage());

@@ -30,9 +30,13 @@ work, PR opened not merged. Author on commits:
 - Live Mode: `/overlay` OBS browser source, confirm-token gate, audit-logged.
 - PWA at `/pwa`: same Sessions/Missions endpoints, camera or synthetic test
   scenes, Plan->questions?->Review->Begin, Jot/Obsidian badges.
-- Spotter Android v0.2.5: phone camera FIT preview, fullscreen + ☰ menu,
-  DAT (APPLICATION_ID=0 dev mode, Meta AI camera->mic permission chain,
-  BT-CONNECT, held-frame flush on connect, SDK diagnostics in status).
+- Spotter Android v0.3.3 (`versionCode = 12`): phone camera FIT preview, fullscreen + ☰ menu,
+  hardened Ray-Ban Meta DAT (`APPLICATION_ID=0` dev mode with in-memory `forceDevMode` reflection,
+  post-link `Permission.CAMERA` verification & Meta AI prompt `4101`, 6-attempt `DeviceSession`
+  startup retry with wear/hinge diagnostics, background `deviceWatcherJob` auto-wake connector,
+  `CallActivity` live POV PIP + expanded stage handoff, and built-in `DemoRecorder` cinema MP4
+  + cue-sheet recorder). See [docs/GLASSES-FIX-AND-PRODUCT-ROADMAP.md](docs/GLASSES-FIX-AND-PRODUCT-ROADMAP.md)
+  for the full root-cause post-mortem and product enhancement roadmap.
 
 ## Honest blockers (owner-owned, not code)
 

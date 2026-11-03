@@ -3,7 +3,6 @@ package tech.nullai.fieldkit.people;
 import android.content.Context;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
-import android.util.Base64;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -27,10 +26,10 @@ import javax.crypto.spec.GCMParameterSpec;
 import tech.nullai.fieldkit.voice.VoicePrint;
 
 /**
- * The wearer's saved people and voices (Nov 2, hackathon). Consent-first: an entry exists only
- * because the wearer pressed "Remember" and typed a name. Stored only on this phone, in app-private
- * storage, encrypted with an AES-256-GCM key held in the Android Keystore (never exported).
- * Nothing here is sent to any third party; only the name reaches the wearer's own AI session.
+ * The wearer's saved people, 4-angle character boards, body/face descriptors, and voices.
+ * Consent-first: an entry exists only because the wearer pressed "Remember" / "Name" and saved it.
+ * Stored only on this phone, in app-private storage, encrypted with an AES-256-GCM key held in the
+ * Android Keystore (never exported).
  */
 public final class PeopleVault {
     private static final String TAG = "PeopleVault";
@@ -39,9 +38,40 @@ public final class PeopleVault {
     public static final double VOICE_THRESHOLD = 0.88;
 
     public static final class Person {
-        public String id, name, thumb = "";       // thumb: base64 JPEG of the frame crop at save time
-        public long savedAt, voiceSavedAt;
-        public float[] face = new float[0], voice = new float[0];
+        public String id = "";
+        public String name = "";
+        public String role = "Contact";
+        public String notes = "";
+        public String thumb = "";                      // base64 JPEG primary crop
+        public String boardThumb = "";                 // base64 JPEG composite 4-angle character board
+        public String[] angleThumbs = new String[]{"", "", "", ""}; // 4 angle base64 JPEGs
+        public String attire = "";
+        public String buildSummary = "";
+        public int upperColorRgb = 0xFF2E3540;
+        public int lowerColorRgb = 0xFF232832;
+        public long savedAt;
+        public long voiceSavedAt;
+        public long lastSeenAt;
+        public int seenCount = 1;
+        public String lastSeenContext = "Spotter HUD";
+        public double lastMatchScore = 1.0;
+        public float[] face = new float[0];
+        public float[] body = new float[0];
+        public float[] voice = new float[0];
+    }
+
+    public static final class RecognitionMatch {
+        public final Person person;
+        public final double score;
+        public final double faceScore;
+        public final double bodyScore;
+
+        public RecognitionMatch(Person person, double score, double faceScore, double bodyScore) {
+            this.person = person;
+            this.score = score;
+            this.faceScore = faceScore;
+            this.bodyScore = bodyScore;
+        }
     }
 
     private static PeopleVault instance;
@@ -63,12 +93,51 @@ public final class PeopleVault {
     public synchronized boolean isEmpty() { return people.isEmpty(); }
 
     public synchronized Person add(String name, float[] face, String thumb) {
+        return addFull(name, "Contact", "", face, new float[0], thumb, "",
+                new String[]{thumb == null ? "" : thumb, "", "", ""},
+                "Standard Attire", "Balanced Proportion", 0xFF2E3540, 0xFF232832, "Spotter Live");
+    }
+
+    public synchronized Person addFull(
+            String name,
+            String role,
+            String notes,
+            float[] face,
+            float[] body,
+            String thumb,
+            String boardThumb,
+            String[] angleThumbs,
+            String attire,
+            String buildSummary,
+            int upperColorRgb,
+            int lowerColorRgb,
+            String contextLabel
+    ) {
         Person p = new Person();
         p.id = UUID.randomUUID().toString().substring(0, 8);
-        p.name = name.trim();
+        p.name = name == null ? "Unnamed" : name.trim();
+        p.role = (role == null || role.trim().isEmpty()) ? "Contact" : role.trim();
+        p.notes = notes == null ? "" : notes.trim();
         p.face = face == null ? new float[0] : face;
+        p.body = body == null ? new float[0] : body;
         p.thumb = thumb == null ? "" : thumb;
-        p.savedAt = System.currentTimeMillis();
+        p.boardThumb = boardThumb == null ? "" : boardThumb;
+        p.angleThumbs = new String[]{"", "", "", ""};
+        if (angleThumbs != null) {
+            for (int i = 0; i < Math.min(4, angleThumbs.length); i++) {
+                p.angleThumbs[i] = angleThumbs[i] == null ? "" : angleThumbs[i];
+            }
+        }
+        p.attire = attire == null ? "" : attire;
+        p.buildSummary = buildSummary == null ? "" : buildSummary;
+        p.upperColorRgb = upperColorRgb;
+        p.lowerColorRgb = lowerColorRgb;
+        long now = System.currentTimeMillis();
+        p.savedAt = now;
+        p.lastSeenAt = now;
+        p.seenCount = 1;
+        p.lastSeenContext = (contextLabel == null || contextLabel.isEmpty()) ? "Spotter HUD" : contextLabel;
+        p.lastMatchScore = 1.0;
         people.add(0, p);
         save();
         return p;
@@ -89,6 +158,31 @@ public final class PeopleVault {
         save();
     }
 
+    public synchronized void updateDossier(String id, String name, String role, String notes) {
+        Person p = find(id);
+        if (p == null) return;
+        if (name != null && !name.trim().isEmpty()) p.name = name.trim();
+        if (role != null) p.role = role.trim().isEmpty() ? "Contact" : role.trim();
+        if (notes != null) p.notes = notes.trim();
+        save();
+    }
+
+    public synchronized void recordSighting(String id, double score, String contextLabel) {
+        Person p = find(id);
+        if (p == null) return;
+        long now = System.currentTimeMillis();
+        boolean incrementCount = (now - p.lastSeenAt) > 25_000L;
+        p.lastSeenAt = now;
+        p.lastMatchScore = score;
+        if (contextLabel != null && !contextLabel.isEmpty()) {
+            p.lastSeenContext = contextLabel;
+        }
+        if (incrementCount) {
+            p.seenCount = Math.max(1, p.seenCount + 1);
+            save();
+        }
+    }
+
     public synchronized void delete(String id) {
         people.removeIf(p -> p.id.equals(id));
         save();
@@ -102,13 +196,44 @@ public final class PeopleVault {
 
     /** Best face match above threshold with a margin over the runner-up, or null. */
     public synchronized Person matchFace(float[] probe) {
-        if (probe == null) return null;
-        List<float[]> known = new ArrayList<>();
-        List<Person> who = new ArrayList<>();
-        for (Person p : people) if (p.face.length == probe.length) { known.add(p.face); who.add(p); }
-        PersonDescriptor.Match m = PersonDescriptor.best(probe, known,
-                PersonDescriptor.DEFAULT_THRESHOLD, PersonDescriptor.MARGIN);
-        return m.index < 0 ? null : who.get(m.index);
+        RecognitionMatch m = matchFaceAndBody(probe, null);
+        return m == null ? null : m.person;
+    }
+
+    /**
+     * Dual-modality Face + Body matcher. Uses face (72%) + body/torso (28%) cosine similarity
+     * and checks margin against runner-up.
+     */
+    public synchronized RecognitionMatch matchFaceAndBody(float[] faceProbe, float[] bodyProbe) {
+        if ((faceProbe == null || faceProbe.length == 0) && (bodyProbe == null || bodyProbe.length == 0)) {
+            return null;
+        }
+        Person bestPerson = null;
+        double bestScore = -1, secondScore = -1;
+        double bestFace = -1, bestBody = -1;
+
+        for (Person p : people) {
+            double sf = (faceProbe != null && p.face.length == faceProbe.length)
+                    ? PersonDescriptor.similarity(faceProbe, p.face) : -1;
+            double sb = (bodyProbe != null && p.body.length == bodyProbe.length)
+                    ? PersonDescriptor.similarity(bodyProbe, p.body) : -1;
+            double combined = PersonDescriptor.combinedSimilarity(faceProbe, bodyProbe, p.face, p.body);
+            if (combined > bestScore) {
+                secondScore = bestScore;
+                bestScore = combined;
+                bestPerson = p;
+                bestFace = sf;
+                bestBody = sb;
+            } else if (combined > secondScore) {
+                secondScore = combined;
+            }
+        }
+        double threshold = (bodyProbe != null && bodyProbe.length > 0)
+                ? PersonDescriptor.COMBINED_THRESHOLD
+                : PersonDescriptor.DEFAULT_THRESHOLD;
+        if (bestPerson == null || bestScore < threshold) return null;
+        if (secondScore > 0 && (bestScore - secondScore) < PersonDescriptor.MARGIN) return null;
+        return new RecognitionMatch(bestPerson, bestScore, bestFace, bestBody);
     }
 
     public synchronized Person matchVoice(float[] print) {
@@ -120,6 +245,10 @@ public final class PeopleVault {
             if (s >= bs) { bs = s; best = p; }
         }
         return best;
+    }
+
+    public synchronized Person findById(String id) {
+        return find(id);
     }
 
     private Person find(String id) {
@@ -159,10 +288,29 @@ public final class PeopleVault {
                 Person p = new Person();
                 p.id = o.getString("id");
                 p.name = o.getString("name");
+                p.role = o.optString("role", "Contact");
+                p.notes = o.optString("notes", "");
                 p.thumb = o.optString("thumb", "");
+                p.boardThumb = o.optString("board_thumb", "");
+                JSONArray angles = o.optJSONArray("angle_thumbs");
+                p.angleThumbs = new String[]{"", "", "", ""};
+                if (angles != null) {
+                    for (int k = 0; k < Math.min(4, angles.length()); k++) {
+                        p.angleThumbs[k] = angles.optString(k, "");
+                    }
+                }
+                p.attire = o.optString("attire", "");
+                p.buildSummary = o.optString("build_summary", "");
+                p.upperColorRgb = o.optInt("upper_rgb", 0xFF2E3540);
+                p.lowerColorRgb = o.optInt("lower_rgb", 0xFF232832);
                 p.savedAt = o.optLong("saved_at");
                 p.voiceSavedAt = o.optLong("voice_saved_at");
+                p.lastSeenAt = o.optLong("last_seen_at", p.savedAt);
+                p.seenCount = Math.max(1, o.optInt("seen_count", 1));
+                p.lastSeenContext = o.optString("last_seen_context", "Spotter HUD");
+                p.lastMatchScore = o.optDouble("last_match_score", 1.0);
                 p.face = floats(o.optJSONArray("face"));
+                p.body = floats(o.optJSONArray("body"));
                 p.voice = floats(o.optJSONArray("voice"));
                 people.add(p);
             }
@@ -175,9 +323,31 @@ public final class PeopleVault {
         try {
             JSONArray arr = new JSONArray();
             for (Person p : people) {
-                arr.put(new JSONObject().put("id", p.id).put("name", p.name).put("thumb", p.thumb)
-                        .put("saved_at", p.savedAt).put("voice_saved_at", p.voiceSavedAt)
-                        .put("face", json(p.face)).put("voice", json(p.voice)));
+                JSONArray angles = new JSONArray();
+                if (p.angleThumbs != null) {
+                    for (String a : p.angleThumbs) angles.put(a == null ? "" : a);
+                }
+                arr.put(new JSONObject()
+                        .put("id", p.id)
+                        .put("name", p.name)
+                        .put("role", p.role)
+                        .put("notes", p.notes)
+                        .put("thumb", p.thumb)
+                        .put("board_thumb", p.boardThumb)
+                        .put("angle_thumbs", angles)
+                        .put("attire", p.attire)
+                        .put("build_summary", p.buildSummary)
+                        .put("upper_rgb", p.upperColorRgb)
+                        .put("lower_rgb", p.lowerColorRgb)
+                        .put("saved_at", p.savedAt)
+                        .put("voice_saved_at", p.voiceSavedAt)
+                        .put("last_seen_at", p.lastSeenAt)
+                        .put("seen_count", p.seenCount)
+                        .put("last_seen_context", p.lastSeenContext)
+                        .put("last_match_score", p.lastMatchScore)
+                        .put("face", json(p.face))
+                        .put("body", json(p.body))
+                        .put("voice", json(p.voice)));
             }
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             c.init(Cipher.ENCRYPT_MODE, key());
@@ -196,7 +366,7 @@ public final class PeopleVault {
 
     private static JSONArray json(float[] v) throws Exception {
         JSONArray a = new JSONArray();
-        for (float f : v) a.put((double) f);
+        if (v != null) for (float f : v) a.put((double) f);
         return a;
     }
 

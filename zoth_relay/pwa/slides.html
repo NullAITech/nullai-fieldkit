@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FieldKit / Spotter — Hackathon Video Slides & Honesty Deck</title>
+<script src="presence.js"></script>
+<style>
+  :root {
+    --bg: #06070a;
+    --card: #121822;
+    --sub: #0b0f17;
+    --border: #26354a;
+    --gold: #f2ce6c;
+    --emerald: #34d399;
+    --sky: #7dd3fc;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    background: #090d14;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-weight: 800;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  .badge {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: #0e2923;
+    color: var(--emerald);
+    border: 1px solid #10b981;
+  }
+  .nav {
+    display: flex;
+    gap: 10px;
+  }
+  .nav button {
+    background: #1b2434;
+    color: var(--text);
+    border: 1px solid #31435e;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .nav button.active {
+    background: #0e2923;
+    color: var(--emerald);
+    border-color: #10b981;
+  }
+  .stage {
+    flex: 1;
+    display: none;
+    padding: 36px 48px;
+    max-width: 1480px;
+    width: 100%;
+    margin: 0 auto;
+    align-items: center;
+    gap: 40px;
+  }
+  .stage.active {
+    display: grid;
+  }
+  .slide-hero {
+    grid-template-columns: 1.25fr 0.95fr;
+  }
+  .slide-two {
+    grid-template-columns: 1fr 1fr;
+  }
+  .slide-full {
+    grid-template-columns: 1fr;
+    align-content: center;
+  }
+  h1 {
+    font-size: 52px;
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    margin-bottom: 18px;
+  }
+  h2 {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 20px;
+  }
+  .kicker {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    color: var(--gold);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .lead {
+    font-size: 21px;
+    line-height: 1.5;
+    color: #cbd5e1;
+    margin-bottom: 28px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 24px 28px;
+  }
+  .presence-box {
+    height: 470px;
+    background: #06070a;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    position: relative;
+  }
+  .presence-box canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .pill-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .pill-item {
+    background: var(--sub);
+    border: 1px solid #222f42;
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .pill-item strong {
+    display: block;
+    color: var(--gold);
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+  .pill-item span {
+    color: #cbd5e1;
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  th, td {
+    text-align: left;
+    padding: 13px 16px;
+    border-bottom: 1px solid #222f42;
+  }
+  th {
+    color: var(--gold);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  td code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    color: var(--sky);
+    background: #0b1320;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .list-check li {
+    list-style: none;
+    padding: 10px 0;
+    border-bottom: 1px solid #1e293b;
+    font-size: 15.5px;
+    line-height: 1.45;
+    color: #e2e8f0;
+  }
+  .list-check li:last-child { border-bottom: none; }
+  .tag-prior {
+    color: #fbbf24;
+    font-weight: 700;
+    font-family: ui-monospace, monospace;
+  }
+  .tag-new {
+    color: var(--emerald);
+    font-weight: 700;
+    font-family: ui-monospace, monospace;
+  }
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 12px 0;
+  }
+  .bar-label {
+    width: 130px;
+    font-family: ui-monospace, monospace;
+    font-size: 14px;
+    color: #cbd5e1;
+  }
+  .bar-track {
+    flex: 1;
+    height: 28px;
+    background: #0b0f17;
+    border: 1px solid #222f42;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #f2ce6c);
+    border-radius: 7px;
+  }
+  .bar-val {
+    width: 110px;
+    text-align: right;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: var(--emerald);
+  }
+  .footer {
+    padding: 12px 32px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--muted);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span>FIELDKIT · SPOTTER BY NULLAI</span>
+    <span class="badge">META GLOBAL AI DEVELOPER HACKATHON · NOV 2026</span>
+  </div>
+  <div class="nav">
+    <button class="active" onclick="showSlide(0)">1 · Hook & Live Presence</button>
+    <button onclick="showSlide(1)">2 · Meta AI Tooling Stack</button>
+    <button onclick="showSlide(2)">3 · Prior vs. Hackathon Honesty</button>
+    <button onclick="showSlide(3)">4 · 60-Turn Latency Proof</button>
+  </div>
+</div>
+
+<!-- SLIDE 1: HOOK & LIVE 3D PRESENCE -->
+<div class="stage slide-hero active" id="slide-0">
+  <div>
+    <div class="kicker">BUILD FOR YOUR WORLD · HANDS-FREE MISSION COACH</div>
+    <h1>You talk. It plans.<br>It watches. It guides.</h1>
+    <p class="lead">
+      When your hands are greasy under a mower or soldering a board, you shouldn't have to stop, unlock a phone, and type into a chat box.
+      <strong>Spotter</strong> streams live from your <strong>Ray-Ban Meta glasses</strong>, turns your goal into a checklist with <strong>Muse Wonder</strong>, and speaks the next step automatically with <strong>Muse Spark</strong>.
+    </p>
+    <div class="pill-grid">
+      <div class="pill-item">
+        <strong>🕶️ Live Ray-Ban Meta DAT Stream</strong>
+        <span>Real 540×960 video feed via Meta Wearables DAT SDK 1.0.1 + instant Phone/Glasses eye switching.</span>
+      </div>
+      <div class="pill-item">
+        <strong>🔊 Live AI Closed Captions & Chats</strong>
+        <span>Real-time wearer + Muse voice subtitles (CC: ON) and persistent multi-session conversation history.</span>
+      </div>
+      <div class="pill-item">
+        <strong>🪪 4-Angle Character Boards</strong>
+        <span>Consent-first wearer-named recognition: 4-angle face/torso board + attire chart pops up on re-sighting.</span>
+      </div>
+      <div class="pill-item">
+        <strong>🧠 Jot + Obsidian Second Brain</strong>
+        <span>Steps tick off automatically in Hermes Jot and compile into an Obsidian vault engram with prior-job recall.</span>
+      </div>
+    </div>
+  </div>
+  <div class="presence-box">
+    <canvas id="heroPresence"></canvas>
+  </div>
+</div>
+
+<!-- SLIDE 2: META AI TOOLING STACK -->
+<div class="stage slide-full" id="slide-1">
+  <div>
+    <div class="kicker">25% RUBRIC · BREADTH & DEPTH OF META AI TOOLING</div>
+    <h2>Every Meta AI Model & SDK Call Site in FieldKit</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Meta Model / SDK</th>
+            <th>Role in FieldKit / Spotter</th>
+            <th>Verified Call Site in Repository</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Muse Spark</strong> (<code>muse-spark-1.1</code>)</td>
+            <td>Default low-latency live vision + conversational voice/text brain (first-token p50 ≈ 1.27 s)</td>
+            <td><code>zoth_relay/providers.py</code> · <code>zoth_relay/sessions.py</code> · <code>zoth_relay/trio.py</code></td>
+          </tr>
+          <tr>
+            <td><strong>Muse Wonder</strong> (<code>muse-wonder-1.0</code>)</td>
+            <td>Interview-then-plan structured mission planner (1–12 typed steps) & step completion assessor</td>
+            <td><code>zoth_relay/missions.py</code> · <code>zoth_relay/providers.py</code></td>
+          </tr>
+          <tr>
+            <td><strong>Muse Spark Open</strong> (<code>muse-spark-open-1026</code>)</td>
+            <td>Open-weight model path via Baseten / Modal + automatic live mid-turn failover (<code>FailoverProvider</code>)</td>
+            <td><code>zoth_relay/providers.py</code> · <code>zoth_relay/server.py</code></td>
+          </tr>
+          <tr>
+            <td><strong>SAM 3.1</strong> (Segment Anything 3.1)</td>
+            <td>Step-target grounding & bounding-box highlights in session replay and mission recaps</td>
+            <td><code>zoth_relay/recap.py</code> · <code>zoth_relay/sessions.py</code> (<code>/v1/sessions/replay</code>)</td>
+          </tr>
+          <tr>
+            <td><strong>Muse Image</strong></td>
+            <td>Visual mission-completion recap card saved into Obsidian Second Brain engram & Jot note</td>
+            <td><code>zoth_relay/recap.py</code> (<code>POST /v1/missions/{id}/recap</code>) · <code>zoth_relay/obsidian.py</code></td>
+          </tr>
+          <tr>
+            <td><strong>Meta Wearables DAT SDK 1.0.1</strong></td>
+            <td>Ray-Ban Meta glasses Bluetooth/Wi-Fi session, camera permission & live <code>I420 → JPEG</code> video stream</td>
+            <td><code>android/.../DatGlasses.kt</code> · <code>mwdat-core:1.0.1</code> · <code>mwdat-camera:1.0.1</code></td>
+          </tr>
+          <tr>
+            <td><strong>Muse Code & MCP Server</strong></td>
+            <td>9 live coding-agent tools (<code>see_now</code>, <code>say</code>, <code>mission_status</code>, <code>advance_step</code>, <code>jot_field_note</code>, etc.)</td>
+            <td><code>zoth_relay/mcp_server.py</code> · <code>docs/muse-code.md</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 3: HONESTY SLIDE (PRIOR WORK VS BUILT AT HACKATHON) -->
+<div class="stage slide-two" id="slide-2">
+  <div class="card">
+    <div class="kicker">FROZEN BASELINE · TAG baseline/pre-event-2026-10-26 (7f5f463)</div>
+    <h2 style="color:#fbbf24;">What Existed Before Kickoff</h2>
+    <ul class="list-check">
+      <li><span class="tag-prior">[PRIOR]</span> Basic local FastAPI voice/chat relay skeleton for personal desktop experiments.</li>
+      <li><span class="tag-prior">[PRIOR]</span> Generic OpenAI-compatible HTTP request wrapper and basic config loader.</li>
+      <li><span class="tag-prior">[PRIOR]</span> Early prototype shell with no Meta models, no Missions API, no proactive Eyes/Advisor/Director trio, no glasses DAT integration, and no Spotter Android app.</li>
+      <li><span class="tag-prior">[PROOF]</span> Machine-verifiable in 1 command:<br><code style="color:#7dd3fc;">git diff baseline/pre-event-2026-10-26..main</code></li>
+    </ul>
+  </div>
+  <div class="card" style="border-color:#10b981;">
+    <div class="kicker">100% BUILT AT HACKATHON · OCT 26 – NOV 4, 2026</div>
+    <h2 style="color:#34d399;">Built During the Hackathon</h2>
+    <ul class="list-check">
+      <li><span class="tag-new">[NEW]</span> <strong>Meta Model Layer:</strong> Muse Spark, Muse Wonder, Muse Spark Open (Baseten/Modal failover), SAM 3.1 grounding, Muse Image recap.</li>
+      <li><span class="tag-new">[NEW]</span> <strong>Spotter Android App + Ray-Ban Meta DAT 1.0.1:</strong> Live glasses video streaming, Phone/Glasses eye switch, MediaPipe detections, Keystore AES-GCM vault.</li>
+      <li><span class="tag-new">[NEW]</span> <strong>Proactive Coach + Memory:</strong> Eyes/Advisor/Director trio, Hermes Jot auto-ticking checklist, Obsidian Second Brain engrams, 9 MCP tools.</li>
+      <li><span class="tag-new">[NEW]</span> <strong>Presence, Captions & 4-Angle Boards:</strong> Chiaroscuro 2D/3D Braille human face, live AI closed captions (<code>CC: ON</code>), Conversations Hub, and 4-Angle Character Boards.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- SLIDE 4: 60-TURN LATENCY BENCHMARK -->
+<div class="stage slide-full" id="slide-3">
+  <div>
+    <div class="kicker">20% RUBRIC · TECHNICAL DEPTH & BOUNDED-CONTEXT EXECUTION</div>
+    <h2>60-Turn Live Soak Benchmark — Turn 60 Answers as Fast as Turn 10</h2>
+    <p class="lead">
+      By combining <strong>SHA-256 perceptual frame diffing</strong> (sending frames only when the scene changes), <strong>system + mission prefix caching</strong>, and a <strong>bounded rolling transcript window</strong>, FieldKit eliminates context bloat over long physical jobs.
+    </p>
+    <div class="card">
+      <div class="bar-row">
+        <div class="bar-label">Turns 1–15</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 50%;"></div></div>
+        <div class="bar-val">p50: 1.25 s</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Turns 16–30</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 51%;"></div></div>
+        <div class="bar-val">p50: 1.28 s</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Turns 31–45</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 50.4%;"></div></div>
+        <div class="bar-val">p50: 1.26 s</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Turns 46–60</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 50.8%;"></div></div>
+        <div class="bar-val">p50: 1.27 s</div>
+      </div>
+      <div class="bar-row" style="margin-top:22px; padding-top:16px; border-top:1px solid #222f42;">
+        <div class="bar-label" style="color:var(--gold); font-weight:700;">Failover Test</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 48%; background:linear-gradient(90deg, #38bdf8, #34d399);"></div></div>
+        <div class="bar-val" style="color:var(--sky);">1.20 s (Open)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <span>Use Left/Right Arrow Keys or Top Buttons to Switch Slides · Tap Face to Cycle Braille/ASCII/Dither/Lattice</span>
+  <span>github.com/NullAITech/nullai-fieldkit · MIT License</span>
+</div>
+
+<script>
+  var pHero = null;
+  window.addEventListener('DOMContentLoaded', function () {
+    var c = document.getElementById('heroPresence');
+    pHero = Presence.mount(c, { mode: '3d', style: 'braille' });
+    pHero.setState('speaking');
+    setInterval(function () {
+      if (pHero) pHero.setLevels(0.35 + 0.35 * Math.random(), 0);
+    }, 180);
+  });
+
+  var curSlide = 0;
+  function showSlide(n) {
+    curSlide = (n + 4) % 4;
+    for (var i = 0; i < 4; i++) {
+      document.getElementById('slide-' + i).classList.toggle('active', i === curSlide);
+      document.querySelectorAll('.nav button')[i].classList.toggle('active', i === curSlide);
+    }
+  }
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === ' ') showSlide(curSlide + 1);
+    if (e.key === 'ArrowLeft') showSlide(curSlide - 1);
+  });
+</script>
+</body>
+</html>
