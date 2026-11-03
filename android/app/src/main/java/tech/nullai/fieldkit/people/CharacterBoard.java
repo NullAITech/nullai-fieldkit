@@ -55,24 +55,35 @@ public final class CharacterBoard {
         void onSaved(PeopleVault.Person person);
     }
 
+    public interface LiveFrameSupplier {
+        Bitmap captureFreshFrame();
+        Detector getDetector();
+    }
+
     public static final class BoardExtraction {
-        public final float[] faceDescriptor;
-        public final float[] bodyDescriptor;
+        public float[] faceDescriptor;
+        public float[][] angleFaceDescriptors;
+        public float[] bodyDescriptor;
         public final Bitmap[] angleBitmaps = new Bitmap[4];
         public final String[] angleBase64 = new String[]{"", "", "", ""};
-        public final Bitmap compositeBoard;
-        public final String compositeBase64;
-        public final String primaryThumbBase64;
-        public final PersonDescriptor.AppearanceProfile appearance;
+        public Bitmap compositeBoard;
+        public String compositeBase64;
+        public String primaryThumbBase64;
+        public PersonDescriptor.AppearanceProfile appearance;
+        public String aiFeatures = "";
+        public int detectedAnglesCount = 1;
 
         BoardExtraction(
                 float[] faceDescriptor,
+                float[][] angleFaceDescriptors,
                 float[] bodyDescriptor,
                 Bitmap[] angles,
                 Bitmap compositeBoard,
-                PersonDescriptor.AppearanceProfile appearance
+                PersonDescriptor.AppearanceProfile appearance,
+                int detectedAnglesCount
         ) {
             this.faceDescriptor = faceDescriptor != null ? faceDescriptor : new float[0];
+            this.angleFaceDescriptors = angleFaceDescriptors != null ? angleFaceDescriptors : new float[0][];
             this.bodyDescriptor = bodyDescriptor != null ? bodyDescriptor : new float[0];
             for (int i = 0; i < 4; i++) {
                 this.angleBitmaps[i] = angles[i];
@@ -83,6 +94,7 @@ public final class CharacterBoard {
             this.primaryThumbBase64 = this.angleBase64[0].isEmpty()
                     ? this.compositeBase64 : this.angleBase64[0];
             this.appearance = appearance;
+            this.detectedAnglesCount = Math.max(1, detectedAnglesCount);
         }
     }
 
@@ -91,10 +103,20 @@ public final class CharacterBoard {
 
     /**
      * Extracts 4 character angles (Front Face, Left Angle, Right Angle, Full Body),
-     * computes both Face (124D) and Body (112D) descriptors, analyzes attire/build,
+     * computes multi-angle Face (124D) and Body (112D) descriptors, analyzes attire/build,
      * and renders a composite Character Board image.
      */
     public static BoardExtraction extract(
+            List<Bitmap> recentFrames,
+            Bitmap primaryFrame,
+            RectF faceBox,
+            RectF bodyBox
+    ) {
+        return extractWithDetector(null, recentFrames, primaryFrame, faceBox, bodyBox);
+    }
+
+    public static BoardExtraction extractWithDetector(
+            Detector detector,
             List<Bitmap> recentFrames,
             Bitmap primaryFrame,
             RectF faceBox,
@@ -115,15 +137,59 @@ public final class CharacterBoard {
         int w = latest.getWidth();
         int h = latest.getHeight();
 
-        RectF fBox = faceBox != null ? new RectF(faceBox)
-                : new RectF(w * 0.28f, h * 0.14f, w * 0.72f, h * 0.52f);
-        RectF bBox = bodyBox != null ? new RectF(bodyBox)
-                : Detector.estimateBodyFromFace(w, h, fBox);
+        RectF fBox = faceBox != null ? new RectF(faceBox) : null;
+        RectF bBox = bodyBox != null ? new RectF(bodyBox) : null;
+
+        if ((fBox == null || bBox == null) && detector != null) {
+            try {
+                Detector.Result dr = detector.detect(latest, false, true);
+                if (fBox == null && !dr.faces.isEmpty()) {
+                    for (RectF f : dr.faces) {
+                        if (fBox == null || f.width() * f.height() > fBox.width() * fBox.height()) {
+                            fBox = new RectF(f);
+                        }
+                    }
+                }
+                if (bBox == null && !dr.bodies.isEmpty()) {
+                    bBox = fBox != null ? Detector.Result.findMatchingBody(fBox, dr.bodies) : new RectF(dr.bodies.get(0));
+                }
+            } catch (Throwable ignored) { }
+        }
+
+        if (fBox == null && bBox != null) {
+            fBox = Detector.estimateFaceFromBody(w, h, bBox);
+        }
+        if (fBox == null) {
+            fBox = detectHeadBySkinAndContour(latest);
+        }
+        if (bBox == null) {
+            bBox = Detector.estimateBodyFromFace(w, h, fBox);
+        }
 
         int[] faceArgb = cropPixels(latest, fBox, 0.10f);
         int fw = Math.max(8, (int) fBox.width());
         int fh = Math.max(8, (int) fBox.height());
-        float[] faceVec = cropDescriptorFace(latest, fBox);
+
+        // Per-frame detection across temporal frames for genuine multi-angle capture
+        Bitmap frameL = frames.size() >= 3 ? frames.get(0) : latest;
+        RectF fBoxL = detectFaceInFrame(detector, frameL, fBox, latest);
+
+        Bitmap frameR = frames.size() >= 2 ? frames.get(frames.size() / 2) : latest;
+        RectF fBoxR = detectFaceInFrame(detector, frameR, fBox, latest);
+
+        float[] vecFront = cropDescriptorFace(latest, fBox, 0.06f);
+        float[] vecTight = cropDescriptorFace(latest, fBox, -0.06f);
+        float[] vecLeft = cropDescriptorFace(frameL, fBoxL, 0.10f);
+        float[] vecRight = cropDescriptorFace(frameR, fBoxR, 0.10f);
+
+        List<float[]> angleVecList = new ArrayList<>();
+        if (vecFront.length > 0) angleVecList.add(vecFront);
+        if (vecTight.length > 0) angleVecList.add(vecTight);
+        if (vecLeft.length > 0) angleVecList.add(vecLeft);
+        if (vecRight.length > 0) angleVecList.add(vecRight);
+
+        float[] faceVec = PersonDescriptor.fuseDescriptors(angleVecList);
+        float[][] angleFaceArr = angleVecList.toArray(new float[0][]);
 
         BodyCropResult bodyCrop = extractPixelsWithSize(latest, bBox, 0.04f);
         float[] bodyVec = bodyCrop != null
@@ -134,18 +200,14 @@ public final class CharacterBoard {
                 ? PersonDescriptor.analyzeAppearance(bodyCrop.pixels, bodyCrop.w, bodyCrop.h, bodyAspect)
                 : PersonDescriptor.analyzeAppearance(faceArgb, fw, fh, 0.6f);
 
-        // Angle 1: Front Face ID
-        Bitmap angle01 = cropBitmapWithMargin(latest, fBox, 0.24f, 0.24f, 0.22f, 0.32f, 240, 240);
+        // Angle 1: Front Face ID (tight head & facial structure crop)
+        Bitmap angle01 = cropBitmapWithMargin(latest, fBox, 0.18f, 0.18f, 0.18f, 0.24f, 240, 240);
 
-        // Angle 2: Oblique Left / Earlier temporal frame crop
-        Bitmap frameL = frames.size() >= 3 ? frames.get(0) : latest;
-        RectF fBoxL = scaleRectBetweenFrames(fBox, latest, frameL);
-        Bitmap angle02 = cropBitmapWithMargin(frameL, fBoxL, 0.42f, 0.16f, 0.28f, 0.40f, 240, 240);
+        // Angle 2: Left Oblique / Temporal Frame 1
+        Bitmap angle02 = cropBitmapWithMargin(frameL, fBoxL, 0.36f, 0.12f, 0.22f, 0.32f, 240, 240);
 
-        // Angle 3: Oblique Right / Mid temporal frame crop
-        Bitmap frameR = frames.size() >= 2 ? frames.get(frames.size() / 2) : latest;
-        RectF fBoxR = scaleRectBetweenFrames(fBox, latest, frameR);
-        Bitmap angle03 = cropBitmapWithMargin(frameR, fBoxR, 0.16f, 0.42f, 0.28f, 0.40f, 240, 240);
+        // Angle 3: Right Oblique / Temporal Frame 2
+        Bitmap angle03 = cropBitmapWithMargin(frameR, fBoxR, 0.12f, 0.36f, 0.22f, 0.32f, 240, 240);
 
         // Angle 4: Full Body & Attire
         RectF fullPersonBox = new RectF(
@@ -154,18 +216,83 @@ public final class CharacterBoard {
                 Math.max(fBox.right, bBox.right),
                 Math.max(fBox.bottom, bBox.bottom)
         );
-        Bitmap angle04 = cropBitmapWithMargin(latest, fullPersonBox, 0.15f, 0.15f, 0.10f, 0.12f, 240, 240);
+        Bitmap angle04 = cropBitmapWithMargin(latest, fullPersonBox, 0.14f, 0.14f, 0.08f, 0.12f, 240, 240);
 
         Bitmap[] angles = new Bitmap[]{angle01, angle02, angle03, angle04};
         Bitmap composite = renderCompositeBoard(angles, appearance,
                 faceVec != null && faceVec.length > 0,
                 bodyVec != null && bodyVec.length > 0);
 
-        return new BoardExtraction(faceVec, bodyVec, angles, composite, appearance);
+        return new BoardExtraction(faceVec, angleFaceArr, bodyVec, angles, composite, appearance, angleVecList.size());
     }
 
-    private static float[] cropDescriptorFace(Bitmap bm, RectF box) {
-        BodyCropResult r = extractPixelsWithSize(bm, box, 0.08f);
+    private static RectF detectFaceInFrame(Detector detector, Bitmap frame, RectF fallbackInLatest, Bitmap latest) {
+        if (frame == null || frame.isRecycled()) return fallbackInLatest;
+        if (detector != null && frame != latest) {
+            try {
+                List<RectF> faces = detector.faces(frame);
+                RectF best = null;
+                for (RectF f : faces) {
+                    if (best == null || f.width() * f.height() > best.width() * best.height()) {
+                        best = f;
+                    }
+                }
+                if (best != null) return new RectF(best);
+            } catch (Throwable ignored) { }
+        }
+        return scaleRectBetweenFrames(fallbackInLatest, latest, frame);
+    }
+
+    /**
+     * Skin-chromaticity + head-contour fallback detector when BlazeFace short-range misses a slightly
+     * distant or side-angled head. Finds the highest-density skin/head region in the upper 65% of the frame.
+     */
+    private static RectF detectHeadBySkinAndContour(Bitmap bm) {
+        int w = bm.getWidth();
+        int h = bm.getHeight();
+        int step = Math.max(2, Math.min(w, h) / 48);
+        double sumX = 0, sumY = 0, weightSum = 0;
+        int minX = w, maxX = 0, minY = h, maxY = 0;
+
+        for (int y = h / 12; y < (h * 62) / 100; y += step) {
+            for (int x = w / 6; x < (w * 5) / 6; x += step) {
+                int p = bm.getPixel(x, y);
+                int r = (p >> 16) & 0xff;
+                int g = (p >> 8) & 0xff;
+                int b = p & 0xff;
+                // YCbCr skin chromaticity + upper-center prior
+                double cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+                double cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+                boolean isSkin = (r > 55 && g > 35 && b > 20 && r > g && r > b
+                        && cb >= 77 && cb <= 132 && cr >= 131 && cr <= 178);
+                if (isSkin) {
+                    double centerBias = 1.0 - 0.5 * Math.abs((x - w * 0.5) / (w * 0.5));
+                    sumX += x * centerBias;
+                    sumY += y * centerBias;
+                    weightSum += centerBias;
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        if (weightSum > 8) {
+            float cx = (float) (sumX / weightSum);
+            float cy = (float) (sumY / weightSum);
+            float boxW = Math.max(w * 0.24f, Math.min(w * 0.48f, (maxX - minX) * 1.35f));
+            float boxH = boxW * 1.22f;
+            float left = Math.max(0f, cx - boxW * 0.5f);
+            float top = Math.max(0f, cy - boxH * 0.48f);
+            float right = Math.min((float) w, left + boxW);
+            float bottom = Math.min((float) h, top + boxH);
+            return new RectF(left, top, right, bottom);
+        }
+        return new RectF(w * 0.28f, h * 0.14f, w * 0.72f, h * 0.52f);
+    }
+
+    private static float[] cropDescriptorFace(Bitmap bm, RectF box, float padFrac) {
+        BodyCropResult r = extractPixelsWithSize(bm, box, padFrac);
         if (r == null) return new float[0];
         float[] v = PersonDescriptor.fromCrop(r.pixels, r.w, r.h);
         return v != null ? v : new float[0];
@@ -431,8 +558,8 @@ public final class CharacterBoard {
     }
 
     /**
-     * Opens the interactive "Save Person Character Board" dialog with a clean everyday layout
-     * plus an expandable Developer Biometrics section.
+     * Opens the interactive "Save Person Character Board" dialog with a clean everyday layout,
+     * live 4-Angle Re-Scanner, Local Relay AI Feature Analyzer, and Developer Biometrics section.
      */
     public static void showSavePersonDialog(
             Activity activity,
@@ -443,8 +570,28 @@ public final class CharacterBoard {
             String contextLabel,
             OnPersonSavedListener listener
     ) {
-        BoardExtraction ext = extract(recentFrames, primaryFrame, faceBox, bodyBox);
-        if (ext == null) {
+        showSavePersonDialog(activity, recentFrames, primaryFrame, faceBox, bodyBox, contextLabel, null, listener);
+    }
+
+    public static void showSavePersonDialog(
+            Activity activity,
+            List<Bitmap> recentFrames,
+            Bitmap primaryFrame,
+            RectF faceBox,
+            RectF bodyBox,
+            String contextLabel,
+            LiveFrameSupplier frameSupplier,
+            OnPersonSavedListener listener
+    ) {
+        Detector det = frameSupplier != null ? frameSupplier.getDetector() : null;
+        final List<Bitmap> workingFrames = new ArrayList<>();
+        if (recentFrames != null) workingFrames.addAll(recentFrames);
+        if (primaryFrame != null && !workingFrames.contains(primaryFrame)) workingFrames.add(primaryFrame);
+
+        final BoardExtraction[] extHolder = new BoardExtraction[]{
+                extractWithDetector(det, workingFrames, primaryFrame, faceBox, bodyBox)
+        };
+        if (extHolder[0] == null) {
             Toast.makeText(activity, "Point the camera at someone first to capture their Character Board.", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -463,35 +610,135 @@ public final class CharacterBoard {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
 
-        TextView sub = new TextView(activity);
-        sub.setText("Captured 4 angles + clothing & posture profile so Spotter can recognize them next time.");
+        final TextView sub = new TextView(activity);
+        sub.setText(String.format(Locale.US,
+                "Locked %d multi-angle descriptors + clothing & posture profile for instant recognition.",
+                extHolder[0].detectedAnglesCount));
         sub.setTextColor(0xFFCBD5E1);
         sub.setTextSize(12.5f);
         sub.setPadding(0, dp(activity, 2), 0, dp(activity, 10));
         root.addView(sub);
 
         // 4-Angle Character Board Preview
-        ImageView boardImg = new ImageView(activity);
+        final ImageView boardImg = new ImageView(activity);
         LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 190));
         boardImg.setLayoutParams(imgLp);
         boardImg.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        boardImg.setImageBitmap(ext.compositeBoard);
+        boardImg.setImageBitmap(extHolder[0].compositeBoard);
         root.addView(boardImg);
 
+        // Live Multi-Angle Capture & Local Relay AI Feature Bar
+        LinearLayout scanRow = new LinearLayout(activity);
+        scanRow.setOrientation(LinearLayout.HORIZONTAL);
+        scanRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams scanRowLp = new LinearLayout.LayoutParams(-1, -2);
+        scanRowLp.topMargin = dp(activity, 8);
+        scanRow.setLayoutParams(scanRowLp);
+
+        final TextView aiStatusTv = new TextView(activity);
+        aiStatusTv.setText("✨ Relay AI Vision: analyzing attire & facial features…");
+        aiStatusTv.setTextColor(0xFF34D399);
+        aiStatusTv.setTextSize(11.5f);
+        aiStatusTv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        aiStatusTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        scanRow.addView(aiStatusTv);
+
+        if (frameSupplier != null) {
+            Button btnRescan = new Button(activity);
+            btnRescan.setText("📸 Capture Angle");
+            btnRescan.setAllCaps(false);
+            btnRescan.setTextColor(0xFF7DD3FC);
+            btnRescan.setTextSize(11.5f);
+            btnRescan.setTypeface(Typeface.DEFAULT_BOLD);
+            btnRescan.setMinHeight(dp(activity, 36));
+            btnRescan.setMinimumHeight(dp(activity, 36));
+            btnRescan.setPadding(dp(activity, 12), dp(activity, 4), dp(activity, 12), dp(activity, 4));
+            btnRescan.setBackgroundResource(R.drawable.bg_dark_pill);
+            scanRow.addView(btnRescan);
+
+            btnRescan.setOnClickListener(v -> {
+                btnRescan.setEnabled(false);
+                btnRescan.setText("Scanning…");
+                new Thread(() -> {
+                    Bitmap fresh = frameSupplier.captureFreshFrame();
+                    Detector d = frameSupplier.getDetector();
+                    if (fresh != null && !fresh.isRecycled()) {
+                        synchronized (workingFrames) {
+                            if (workingFrames.size() >= 6) workingFrames.remove(0);
+                            workingFrames.add(fresh);
+                        }
+                        BoardExtraction updated = extractWithDetector(d, workingFrames, fresh, null, null);
+                        if (updated != null) {
+                            // Merge previous angle face descriptors with new ones (up to 8 angles)
+                            List<float[]> mergedAngles = new ArrayList<>();
+                            if (extHolder[0].angleFaceDescriptors != null) {
+                                for (float[] av : extHolder[0].angleFaceDescriptors) {
+                                    if (av != null && av.length > 0) mergedAngles.add(av);
+                                }
+                            }
+                            if (updated.angleFaceDescriptors != null) {
+                                for (float[] av : updated.angleFaceDescriptors) {
+                                    if (av != null && av.length > 0 && mergedAngles.size() < 8) {
+                                        mergedAngles.add(av);
+                                    }
+                                }
+                            }
+                            updated.angleFaceDescriptors = mergedAngles.toArray(new float[0][]);
+                            updated.faceDescriptor = PersonDescriptor.fuseDescriptors(mergedAngles);
+                            updated.detectedAnglesCount = mergedAngles.size();
+                            extHolder[0] = updated;
+                        }
+                    }
+                    activity.runOnUiThread(() -> {
+                        btnRescan.setEnabled(true);
+                        btnRescan.setText("📸 +Angle (" + extHolder[0].detectedAnglesCount + ")");
+                        boardImg.setImageBitmap(extHolder[0].compositeBoard);
+                        sub.setText(String.format(Locale.US,
+                                "Locked %d multi-angle descriptors + clothing & posture profile for high-precision recognition.",
+                                extHolder[0].detectedAnglesCount));
+                    });
+                }, "board-rescan").start();
+            });
+        }
+        root.addView(scanRow);
+
         // Digestible Summary Card
-        LinearLayout summaryCard = new LinearLayout(activity);
+        final LinearLayout summaryCard = new LinearLayout(activity);
         summaryCard.setOrientation(LinearLayout.VERTICAL);
         summaryCard.setBackgroundResource(R.drawable.bg_dark_card);
         summaryCard.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
         LinearLayout.LayoutParams sumLp = new LinearLayout.LayoutParams(-1, -2);
-        sumLp.topMargin = dp(activity, 10);
+        sumLp.topMargin = dp(activity, 8);
         summaryCard.setLayoutParams(sumLp);
 
-        addChartRow(activity, summaryCard, "Look & Attire", ext.appearance.attireSummary, 0xFFFFFFFF);
-        addChartRow(activity, summaryCard, "Posture / Build", ext.appearance.buildSignature, 0xFF7DD3FC);
-        addChartRow(activity, summaryCard, "Captured Via", contextLabel != null ? contextLabel : "Spotter Camera", 0xFF34D399);
+        final String[] enrichedAttire = new String[]{extHolder[0].appearance.attireSummary};
+        final String[] enrichedBuild = new String[]{extHolder[0].appearance.buildSignature};
+        final String[] enrichedFeatures = new String[]{"Multi-angle Face + Body Lock"};
+
+        Runnable rebuildSummaryRows = () -> {
+            summaryCard.removeAllViews();
+            addChartRow(activity, summaryCard, "Look & Attire", enrichedAttire[0], 0xFFFFFFFF);
+            addChartRow(activity, summaryCard, "Features", enrichedFeatures[0], 0xFFFDE68A);
+            addChartRow(activity, summaryCard, "Posture / Build", enrichedBuild[0], 0xFF7DD3FC);
+            addChartRow(activity, summaryCard, "Captured Via", contextLabel != null ? contextLabel : "Spotter Camera", 0xFF34D399);
+        };
+        rebuildSummaryRows.run();
         root.addView(summaryCard);
+
+        // Trigger async Local Relay /v1/people/analyze enrichment
+        analyzeWithRelayAsync(activity, extHolder[0].compositeBase64,
+                extHolder[0].appearance.attireSummary, extHolder[0].appearance.buildSignature,
+                (attire, features, build) -> activity.runOnUiThread(() -> {
+                    if (attire != null && !attire.isEmpty()) enrichedAttire[0] = attire;
+                    if (features != null && !features.isEmpty()) {
+                        enrichedFeatures[0] = features;
+                        extHolder[0].aiFeatures = features;
+                    }
+                    if (build != null && !build.isEmpty()) enrichedBuild[0] = build;
+                    aiStatusTv.setText("✨ Relay AI Vision: attire & facial features locked ✓");
+                    rebuildSummaryRows.run();
+                }));
 
         // Name Input
         root.addView(fieldLabel(activity, "PERSON'S NAME"));
@@ -535,13 +782,13 @@ public final class CharacterBoard {
         // Collapsible Developer Biometrics Section
         root.addView(buildDevTelemetryToggle(
                 activity,
-                ext.faceDescriptor.length,
-                ext.bodyDescriptor.length,
+                extHolder[0].faceDescriptor.length,
+                extHolder[0].bodyDescriptor.length,
                 1.0,
                 1.0,
                 1.0,
-                ext.appearance.upperColorRgb,
-                ext.appearance.lowerColorRgb,
+                extHolder[0].appearance.upperColorRgb,
+                extHolder[0].appearance.lowerColorRgb,
                 "NEW_ENROLLMENT"
         ));
 
@@ -560,20 +807,25 @@ public final class CharacterBoard {
                     return;
                 }
                 String role = etRole.getText().toString().trim();
-                String notes = etNotes.getText().toString().trim();
-                PeopleVault.Person saved = PeopleVault.get(activity).addFull(
+                String userNotes = etNotes.getText().toString().trim();
+                String fullAttire = enrichedAttire[0];
+                if (!extHolder[0].aiFeatures.isEmpty() && !fullAttire.contains(extHolder[0].aiFeatures)) {
+                    fullAttire = fullAttire + " · " + extHolder[0].aiFeatures;
+                }
+                PeopleVault.Person saved = PeopleVault.get(activity).addFullWithAngles(
                         name,
                         role.isEmpty() ? "Contact" : role,
-                        notes,
-                        ext.faceDescriptor,
-                        ext.bodyDescriptor,
-                        ext.primaryThumbBase64,
-                        ext.compositeBase64,
-                        ext.angleBase64,
-                        ext.appearance.attireSummary,
-                        ext.appearance.buildSignature,
-                        ext.appearance.upperColorRgb,
-                        ext.appearance.lowerColorRgb,
+                        userNotes,
+                        extHolder[0].faceDescriptor,
+                        extHolder[0].angleFaceDescriptors,
+                        extHolder[0].bodyDescriptor,
+                        extHolder[0].primaryThumbBase64,
+                        extHolder[0].compositeBase64,
+                        extHolder[0].angleBase64,
+                        fullAttire,
+                        enrichedBuild[0],
+                        extHolder[0].appearance.upperColorRgb,
+                        extHolder[0].appearance.lowerColorRgb,
                         contextLabel
                 );
                 dialog.dismiss();
@@ -582,6 +834,55 @@ public final class CharacterBoard {
         });
 
         dialog.show();
+    }
+
+    private interface RelayAnalysisCallback {
+        void onAnalyzed(String attire, String features, String build);
+    }
+
+    private static void analyzeWithRelayAsync(
+            Context ctx,
+            String imageB64,
+            String attireHint,
+            String buildHint,
+            RelayAnalysisCallback cb
+    ) {
+        if (ctx == null || imageB64 == null || imageB64.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                android.content.SharedPreferences prefs = ctx.getApplicationContext()
+                        .getSharedPreferences("fieldkit", Context.MODE_PRIVATE);
+                String relay = prefs.getString("relay", null);
+                String token = prefs.getString("token", null);
+                if (relay == null || token == null || relay.isEmpty() || token.isEmpty()) return;
+                String url = relay.replaceAll("/+$", "") + "/v1/people/analyze";
+                org.json.JSONObject payload = new org.json.JSONObject()
+                        .put("image", imageB64)
+                        .put("attire_hint", attireHint != null ? attireHint : "")
+                        .put("build_hint", buildHint != null ? buildHint : "");
+                okhttp3.OkHttpClient client = new okhttp3.OkHttpClient.Builder()
+                        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+                        .build();
+                okhttp3.Request req = new okhttp3.Request.Builder()
+                        .url(url)
+                        .header("Authorization", "Bearer " + token)
+                        .post(okhttp3.RequestBody.create(
+                                payload.toString(),
+                                okhttp3.MediaType.get("application/json; charset=utf-8")))
+                        .build();
+                try (okhttp3.Response r = client.newCall(req).execute()) {
+                    if (r.isSuccessful() && r.body() != null) {
+                        org.json.JSONObject o = new org.json.JSONObject(r.body().string());
+                        cb.onAnalyzed(
+                                o.optString("attire", ""),
+                                o.optString("features", ""),
+                                o.optString("build", "")
+                        );
+                    }
+                }
+            } catch (Throwable ignored) { }
+        }, "relay-person-analyze").start();
     }
 
     /**

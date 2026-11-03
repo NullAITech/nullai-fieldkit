@@ -56,6 +56,7 @@ public final class PeopleVault {
         public String lastSeenContext = "Spotter HUD";
         public double lastMatchScore = 1.0;
         public float[] face = new float[0];
+        public float[][] angleFaces = new float[0][];
         public float[] body = new float[0];
         public float[] voice = new float[0];
     }
@@ -116,12 +117,33 @@ public final class PeopleVault {
             int lowerColorRgb,
             String contextLabel
     ) {
+        return addFullWithAngles(name, role, notes, face, null, body, thumb, boardThumb,
+                angleThumbs, attire, buildSummary, upperColorRgb, lowerColorRgb, contextLabel);
+    }
+
+    public synchronized Person addFullWithAngles(
+            String name,
+            String role,
+            String notes,
+            float[] face,
+            float[][] angleFaces,
+            float[] body,
+            String thumb,
+            String boardThumb,
+            String[] angleThumbs,
+            String attire,
+            String buildSummary,
+            int upperColorRgb,
+            int lowerColorRgb,
+            String contextLabel
+    ) {
         Person p = new Person();
         p.id = UUID.randomUUID().toString().substring(0, 8);
         p.name = name == null ? "Unnamed" : name.trim();
         p.role = (role == null || role.trim().isEmpty()) ? "Contact" : role.trim();
         p.notes = notes == null ? "" : notes.trim();
         p.face = face == null ? new float[0] : face;
+        p.angleFaces = angleFaces == null ? new float[0][] : angleFaces;
         p.body = body == null ? new float[0] : body;
         p.thumb = thumb == null ? "" : thumb;
         p.boardThumb = boardThumb == null ? "" : boardThumb;
@@ -167,6 +189,15 @@ public final class PeopleVault {
         if (name != null && !name.trim().isEmpty()) p.name = name.trim();
         if (role != null) p.role = role.trim().isEmpty() ? "Contact" : role.trim();
         if (notes != null) p.notes = notes.trim();
+        save();
+    }
+
+    public synchronized void updateAppearanceAndNotes(String id, String attire, String buildSummary, String notes) {
+        Person p = find(id);
+        if (p == null) return;
+        if (attire != null && !attire.trim().isEmpty()) p.attire = attire.trim();
+        if (buildSummary != null && !buildSummary.trim().isEmpty()) p.buildSummary = buildSummary.trim();
+        if (notes != null && !notes.trim().isEmpty()) p.notes = notes.trim();
         save();
     }
 
@@ -216,11 +247,20 @@ public final class PeopleVault {
         double bestFace = -1, bestBody = -1;
 
         for (Person p : people) {
-            double sf = (faceProbe != null && p.face.length == faceProbe.length)
-                    ? PersonDescriptor.similarity(faceProbe, p.face) : -1;
+            double sf = (faceProbe != null && faceProbe.length > 0)
+                    ? PersonDescriptor.bestMultiAngleSimilarity(faceProbe, p.face, p.angleFaces) : -1;
             double sb = (bodyProbe != null && p.body.length == bodyProbe.length)
                     ? PersonDescriptor.similarity(bodyProbe, p.body) : -1;
-            double combined = PersonDescriptor.combinedSimilarity(faceProbe, bodyProbe, p.face, p.body);
+            double combined;
+            if (sf >= 0 && sb >= 0) {
+                combined = sf * 0.72 + sb * 0.28;
+            } else if (sf >= 0) {
+                combined = sf;
+            } else if (sb >= 0) {
+                combined = sb * 0.94;
+            } else {
+                combined = -1;
+            }
             if (combined > bestScore) {
                 secondScore = bestScore;
                 bestScore = combined;
@@ -313,6 +353,13 @@ public final class PeopleVault {
                 p.lastSeenContext = o.optString("last_seen_context", "Spotter HUD");
                 p.lastMatchScore = o.optDouble("last_match_score", 1.0);
                 p.face = floats(o.optJSONArray("face"));
+                JSONArray afArr = o.optJSONArray("angle_faces");
+                if (afArr != null && afArr.length() > 0) {
+                    p.angleFaces = new float[afArr.length()][];
+                    for (int k = 0; k < afArr.length(); k++) {
+                        p.angleFaces[k] = floats(afArr.optJSONArray(k));
+                    }
+                }
                 p.body = floats(o.optJSONArray("body"));
                 p.voice = floats(o.optJSONArray("voice"));
                 people.add(p);
@@ -329,6 +376,12 @@ public final class PeopleVault {
                 JSONArray angles = new JSONArray();
                 if (p.angleThumbs != null) {
                     for (String a : p.angleThumbs) angles.put(a == null ? "" : a);
+                }
+                JSONArray afJson = new JSONArray();
+                if (p.angleFaces != null) {
+                    for (float[] av : p.angleFaces) {
+                        if (av != null && av.length > 0) afJson.put(json(av));
+                    }
                 }
                 arr.put(new JSONObject()
                         .put("id", p.id)
@@ -349,6 +402,7 @@ public final class PeopleVault {
                         .put("last_seen_context", p.lastSeenContext)
                         .put("last_match_score", p.lastMatchScore)
                         .put("face", json(p.face))
+                        .put("angle_faces", afJson)
                         .put("body", json(p.body))
                         .put("voice", json(p.voice)));
             }

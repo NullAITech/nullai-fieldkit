@@ -61,10 +61,12 @@ public final class CallActivity extends Activity {
     private TextView meter;
     private TextView liveCaptionsTv;
     private LinearLayout personCardOverlay;
-    private Button muteBtn, eyesBtn, avatarBtn, hangBtn, recBtn, captionsBtn, chatsBtn, devBtn;
+    private Button muteBtn, eyesBtn, avatarBtn, hangBtn, recBtn, captionsBtn, voiceLockBtn, chatsBtn, devBtn;
     private boolean pipExpanded = false;
     private boolean devTelemetryVisible = false;
+    private boolean voiceLockEnabled = true;
     private long lastPreviewPaintAt = 0L;
+    private long lastRollingFrameAt = 0L;
 
     private boolean use3d, videoOn, muted, started, greeted;
     private boolean captionsEnabled = true;
@@ -144,6 +146,12 @@ public final class CallActivity extends Activity {
             onStreamingTranscript(text, fromWearer);
         }
 
+        @Override public void onVoiceLockNotice(String notice, boolean blockedBystander) {
+            showLiveCaptionBanner(notice);
+            addCaption("· " + notice);
+            updateVoiceLockButtonUi();
+        }
+
         @Override public void onEnded(String why) {
             setState("Call ended — " + why);
             main.postDelayed(CallActivity.this::finish, 1500);
@@ -183,10 +191,17 @@ public final class CallActivity extends Activity {
         detectBtn = findViewById(R.id.btnDetect);
         recBtn = findViewById(R.id.btnCallRec);
         captionsBtn = findViewById(R.id.btnCallCaptions);
+        voiceLockBtn = findViewById(R.id.btnCallVoiceLock);
         chatsBtn = findViewById(R.id.btnCallChats);
         devBtn = findViewById(R.id.btnCallDev);
         preview = findViewById(R.id.ivEyesPreview);
         visionTv = findViewById(R.id.tvVision);
+
+        voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", true);
+        updateVoiceLockButtonUi();
+        if (voiceLockBtn != null) {
+            voiceLockBtn.setOnClickListener(v -> showVoiceLockDialog());
+        }
 
         if (devBtn != null) {
             devBtn.setOnClickListener(v -> {
@@ -224,7 +239,7 @@ public final class CallActivity extends Activity {
         }
 
         if (recBtn != null) {
-            recBtn.setText(DemoRecorder.get().currentButtonLabel());
+            recBtn.setText(DemoRecorder.get().isRecording() ? DemoRecorder.get().currentButtonLabel() : "● REC");
             recBtn.setOnClickListener(v -> DemoRecorder.get().toggle(this));
         }
         if (preview != null) {
@@ -269,6 +284,56 @@ public final class CallActivity extends Activity {
         captionsBtn.setText(captionsEnabled ? "CC: ON" : "CC: OFF");
         captionsBtn.setTextColor(captionsEnabled ? 0xFF34D399 : 0xFF94A3B8);
         captionsBtn.setBackgroundResource(captionsEnabled ? R.drawable.bg_accent_emerald : R.drawable.bg_dark_pill);
+    }
+
+    private void updateVoiceLockButtonUi() {
+        if (voiceLockBtn == null) return;
+        boolean enrolled = (call != null && call.isVoiceEnrolled())
+                || tech.nullai.fieldkit.voice.OwnerPrintPrefs.load(this).isEnrolled();
+        if (voiceLockEnabled) {
+            voiceLockBtn.setText(enrolled ? "🔒 My Voice" : "🔒 Voice Auto");
+            voiceLockBtn.setTextColor(0xFF34D399);
+            voiceLockBtn.setBackgroundResource(R.drawable.bg_accent_emerald);
+        } else {
+            voiceLockBtn.setText("🔓 All Voices");
+            voiceLockBtn.setTextColor(0xFF94A3B8);
+            voiceLockBtn.setBackgroundResource(R.drawable.bg_dark_pill);
+        }
+    }
+
+    private void showVoiceLockDialog() {
+        boolean enrolled = (call != null && call.isVoiceEnrolled())
+                || tech.nullai.fieldkit.voice.OwnerPrintPrefs.load(this).isEnrolled();
+        long blocked = call != null ? call.blockedBystanderCount() : 0L;
+        String msg = "Wearer-Only Voice Lock ensures Muse ONLY listens to YOUR voice and ignores bystanders talking nearby.\n\n"
+                + "• Status: " + (voiceLockEnabled ? "ACTIVE (My Voice Only)" : "OFF (All Voices)") + "\n"
+                + "• Voiceprint: " + (enrolled ? "Enrolled & Locked ✓" : "Auto-locking on your next phrase") + "\n"
+                + "• Bystanders Blocked: " + blocked;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("🔒 Wearer-Only Voice Lock")
+                .setMessage(msg)
+                .setPositiveButton("🎙️ Calibrate My Voice Now", (d, w) -> {
+                    voiceLockEnabled = true;
+                    getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
+                            .putBoolean("voice_lock_enabled", true).apply();
+                    if (call != null) {
+                        call.setVoiceLockEnabled(true);
+                        call.lockCurrentVoiceNow();
+                    }
+                    updateVoiceLockButtonUi();
+                })
+                .setNeutralButton(voiceLockEnabled ? "Turn Lock Off" : "Turn Lock On", (d, w) -> {
+                    voiceLockEnabled = !voiceLockEnabled;
+                    getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
+                            .putBoolean("voice_lock_enabled", voiceLockEnabled).apply();
+                    if (call != null) call.setVoiceLockEnabled(voiceLockEnabled);
+                    updateVoiceLockButtonUi();
+                    showLiveCaptionBanner(voiceLockEnabled
+                            ? "🔒 Wearer-Only Voice Lock ENABLED"
+                            : "🔓 Voice Lock paused — listening to all voices");
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void showLiveCaptionBanner(String line) {
@@ -332,7 +397,7 @@ public final class CallActivity extends Activity {
         updateCaptionsButtonUi();
         DemoRecorder.get().setUiListener((recording, label) -> {
             if (recBtn != null) {
-                recBtn.setText(label);
+                recBtn.setText(recording ? label : "● REC");
                 recBtn.setTextColor(recording ? 0xFFFF5252 : 0xFFFF8A8A);
             }
         });
@@ -435,8 +500,10 @@ public final class CallActivity extends Activity {
         previousGlassesListener = DatGlasses.INSTANCE.getListener();
         DatGlasses.INSTANCE.setListener(callEyes);
         call = new LiveCall(relay, token, buildSavedPeopleContext(), callListener);
+        call.configureVoiceLock(this, voiceLockEnabled);
         if (videoOn) call.setVideoEnabled(true);
         call.start();
+        updateVoiceLockButtonUi();
         Log.i("CallStats", "call open · relay " + relay + " · video " + use3d
                 + " · mic open until hang-up");
     }
@@ -553,7 +620,10 @@ public final class CallActivity extends Activity {
 
     private void pushRollingFrame(Bitmap bmp) {
         if (bmp == null) return;
+        long now = System.currentTimeMillis();
         synchronized (rollingFrames) {
+            if (!rollingFrames.isEmpty() && now - lastRollingFrameAt < 420) return;
+            lastRollingFrameAt = now;
             if (rollingFrames.size() >= 4) rollingFrames.removeFirst();
             rollingFrames.addLast(bmp);
         }
@@ -827,6 +897,15 @@ public final class CallActivity extends Activity {
             final RectF fBox = bestFace;
             final RectF bBox = bestBody;
             final List<Bitmap> frames = snapshotRollingFrames();
+            final CharacterBoard.LiveFrameSupplier supplier = new CharacterBoard.LiveFrameSupplier() {
+                @Override public Bitmap captureFreshFrame() {
+                    byte[] cur = lastJpeg;
+                    return cur != null ? decodeFrame(cur) : bmp;
+                }
+                @Override public Detector getDetector() {
+                    return detector();
+                }
+            };
             main.post(() -> CharacterBoard.showSavePersonDialog(
                     this,
                     frames,
@@ -834,6 +913,7 @@ public final class CallActivity extends Activity {
                     fBox,
                     bBox,
                     eyesGlasses ? "Glasses Live Call" : "Phone Live Call",
+                    supplier,
                     saved -> {
                         announced.put(saved.name, System.currentTimeMillis());
                         setState("Saved Character Board: " + saved.name + " [" + saved.role + "]");

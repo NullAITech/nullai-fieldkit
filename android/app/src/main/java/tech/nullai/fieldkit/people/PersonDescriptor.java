@@ -42,18 +42,33 @@ public final class PersonDescriptor {
     public static float[] fromCrop(int[] argb, int w, int h) {
         if (argb == null || w < COL || h < COL) return null;
 
-        // frame average colour, used to make the colour grid light-invariant
-        double fr = 0, fg = 0, fb = 0;
-        for (int p : argb) {
-            fr += (p >> 16) & 0xff;
-            fg += (p >> 8) & 0xff;
-            fb += p & 0xff;
+        // Center-weighted illumination reference (inner 65% oval of the crop so background walls don't skew skin/hair tone)
+        double fr = 0, fg = 0, fb = 0, fn = 0;
+        int x0 = w / 6, x1 = Math.max(x0 + 1, w - w / 6);
+        int y0 = h / 6, y1 = Math.max(y0 + 1, h - h / 6);
+        for (int y = y0; y < y1; y++) {
+            for (int x = x0; x < x1; x++) {
+                int p = argb[y * w + x];
+                fr += (p >> 16) & 0xff;
+                fg += (p >> 8) & 0xff;
+                fb += p & 0xff;
+                fn++;
+            }
         }
-        fr /= argb.length; fg /= argb.length; fb /= argb.length;
+        if (fn <= 0) {
+            for (int p : argb) {
+                fr += (p >> 16) & 0xff;
+                fg += (p >> 8) & 0xff;
+                fb += p & 0xff;
+            }
+            fn = argb.length;
+        }
+        fr /= fn; fg /= fn; fb /= fn;
+        double meanLum = (0.299 * fr + 0.587 * fg + 0.114 * fb) / 255.0;
 
         float[] v = new float[DIMS];
 
-        // grey grid
+        // 8x8 grey grid, mean-centered and zonally weighted (eye band, nose bridge, mouth/jaw weighted higher than outer corners)
         for (int gy = 0; gy < GREY; gy++) {
             for (int gx = 0; gx < GREY; gx++) {
                 double s = 0, n = 0;
@@ -64,7 +79,11 @@ public final class PersonDescriptor {
                         n++;
                     }
                 }
-                v[gy * GREY + gx] = (float) (n > 0 ? s / n : 0);
+                double cellLum = (n > 0 ? s / n : meanLum);
+                boolean isCorner = ( gx == 0 || gx == GREY - 1 ) && ( gy == 0 || gy == GREY - 1 );
+                boolean isCoreFace = (gx >= 1 && gx <= 6 && gy >= 1 && gy <= 6);
+                float zoneWeight = isCorner ? 0.45f : (isCoreFace ? 1.22f : 0.85f);
+                v[gy * GREY + gx] = (float) (cellLum * zoneWeight);
             }
         }
 
@@ -114,6 +133,43 @@ public final class PersonDescriptor {
         for (int i = gbase; i < DIMS; i++) v[i] *= 3.0f;
 
         return normalize(v);
+    }
+
+    /** Fuses multiple angle descriptors into a single L2-normalised centroid descriptor. */
+    public static float[] fuseDescriptors(java.util.List<float[]> vectors) {
+        if (vectors == null || vectors.isEmpty()) return new float[0];
+        int dim = -1;
+        for (float[] v : vectors) {
+            if (v != null && v.length > 0) {
+                dim = v.length;
+                break;
+            }
+        }
+        if (dim <= 0) return new float[0];
+        float[] sum = new float[dim];
+        int count = 0;
+        for (float[] v : vectors) {
+            if (v == null || v.length != dim) continue;
+            for (int i = 0; i < dim; i++) sum[i] += v[i];
+            count++;
+        }
+        if (count == 0) return new float[0];
+        return normalize(sum);
+    }
+
+    /** Returns the highest cosine similarity across the fused centroid and any individual saved angle vectors. */
+    public static double bestMultiAngleSimilarity(float[] probe, float[] centroid, float[][] angleVectors) {
+        if (probe == null || probe.length == 0) return -1;
+        double best = similarity(probe, centroid);
+        if (angleVectors != null) {
+            for (float[] ang : angleVectors) {
+                if (ang != null && ang.length == probe.length) {
+                    double s = similarity(probe, ang);
+                    if (s > best) best = s;
+                }
+            }
+        }
+        return best;
     }
 
     /**

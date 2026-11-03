@@ -272,3 +272,21 @@ def test_pwa_has_eyes_switch_and_people_card(env):
     assert r.status_code == 200
     for marker in ('id="eyesSrc"', "Remember person", "PEOPLE &amp; VOICES", '"/v1/people"', 'type: "eyes"'):
         assert marker in r.text
+
+
+def test_people_analyze_and_context_snapshot(env):
+    c = env["c"]
+    c.post("/v1/people", headers=H(), json={"name": "Maya", "descriptor": unit(2), "relation": "Teammate",
+                                             "note": "Attire: Cobalt Denim"})
+    r_an = c.post("/v1/people/analyze", headers=H(), json={"image": JPG, "attire_hint": "Cobalt Jacket"})
+    assert r_an.status_code == 200
+    data_an = r_an.json()
+    assert "Cobalt Jacket" in data_an["attire"]
+    assert "summary" in data_an
+
+    r_snap = c.get("/v1/context/snapshot", headers=H())
+    assert r_snap.status_code == 200
+    snap = r_snap.json()
+    assert snap["saved_people_count"] == 1
+    assert snap["saved_people"][0]["name"] == "Maya"
+    assert "[SPOTTER LOCAL RELAY DIGEST" in snap["prompt_digest"]

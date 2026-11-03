@@ -14,7 +14,7 @@ import uuid
 
 from . import __version__
 from .ask import AskError, ask_events, build_messages, decode_image
-from . import jot_bridge, recap, second_brain
+from . import enrichment, jot_bridge, recap, second_brain
 from .missions import MISSIONS, MissionError, MissionStore, assess_step, plan_interview
 from .providers import configured_providers, presets_public, provider_presets, with_failover
 from .sessions import ACTIVE_SESSIONS, FRAMES, LAST_SESSIONS, Session
@@ -47,6 +47,12 @@ class PersonPatch(BaseModel):
 
 class VoiceSave(BaseModel):
     voice: list[float]
+
+
+class PersonAnalyzeRequest(BaseModel):
+    image: str = Field(..., description="base64 JPEG of person crop or 4-angle Character Board")
+    attire_hint: str = Field("", max_length=200)
+    build_hint: str = Field("", max_length=120)
 
 
 class ExecRequest(BaseModel):
@@ -459,8 +465,16 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
             image = decode_image(body.image, body.image_mime) if body.image else None
         except AskError as e:
             raise HTTPException(e.status, e.detail)
+        mission_ctx = body.mission or ""
+        try:
+            p_lines = people_for(agent, ip).prompt_lines(limit=10)
+            if p_lines and "[SAVED PEOPLE" not in mission_ctx:
+                roster = "[SAVED PEOPLE ROSTER]: " + " | ".join(p_lines)
+                mission_ctx = f"{mission_ctx}\n{roster}".strip() if mission_ctx else roster
+        except Exception:
+            pass
         msgs = build_messages(target, body.prompt, image, [h.model_dump() for h in body.history],
-                              body.system or "", body.mission or "")
+                              body.system or "", mission_ctx)
         rid = uuid.uuid4().hex[:12]
         # sizes only: prompts and images are never logged or stored
         relay.audit.write("ask", agent=agent.name, ip=ip, via="rest", target=target.name, id=rid,
@@ -752,6 +766,33 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         relay.audit.write("people", agent=agent.name, ip=ip, via="rest", result="forgot_all", n=n)
         return {"ok": True, "deleted": n}
 
+    @app.post("/v1/people/analyze", operation_id="analyzePersonBoard")
+    async def people_analyze(request: Request, body: PersonAnalyzeRequest, agent: Agent = Depends(auth)):
+        """Local Relay visual feature & attire analyzer for 4-Angle Character Boards."""
+        ip = client_ip(request)
+        relay.check_sessions(agent, ip)
+        res = await enrichment.analyze_person_image(
+            body.image,
+            attire_hint=body.attire_hint,
+            build_hint=body.build_hint,
+            transport=getattr(app.state, "ask_transport", None),
+        )
+        return JSONResponse(res, headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/context/snapshot", operation_id="contextSnapshot")
+    async def context_snapshot(request: Request, agent: Agent = Depends(auth)):
+        """Returns a pre-digested situational & Saved People context snapshot for any cloud or local model."""
+        ip = client_ip(request)
+        store = people_for(agent, ip)
+        sess = ACTIVE_SESSIONS.get(agent.name) or LAST_SESSIONS.get(agent.name)
+        snap = enrichment.build_model_assist_digest(
+            agent.name,
+            people_store=store,
+            session=sess,
+            mission_store=missions_store(),
+        )
+        return JSONResponse(snap, headers={"Cache-Control": "no-store"})
+
     @app.get("/v1/sessions/replay", operation_id="sessionReplay")
     async def session_replay(agent: Agent = Depends(auth)):
         """'What it saw': frames used, SAM 3.1 boxes (or labelled stand-in),
@@ -932,7 +973,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                     names = match_in_view(store, m.get("descriptors"))
                     if isinstance(m.get("names"), list):        # matched on the phone already
                         names += [str(n)[:80] for n in m["names"] if isinstance(n, str)
-                                  and any(p.name == n for p in store.named())]
+                                  and any(p.name.lower() == str(n).strip().lower() for p in store.named())]
                     new = sess.set_in_view(names)
                     if new:
                         await ws.send_json({"type": "person_in_view", "names": new})

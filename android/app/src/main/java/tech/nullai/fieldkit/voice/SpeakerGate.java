@@ -65,6 +65,10 @@ public final class SpeakerGate {
         return owner != null;
     }
 
+    public synchronized double getThreshold() {
+        return threshold;
+    }
+
     public synchronized float[] ownerPrint() {
         return owner == null ? null : owner.clone();
     }

@@ -1120,14 +1120,43 @@ public class MainActivity extends Activity {
     private void onUtterance(VoiceCapture.Result r) {
         if (r == null || !r.spoken()) {
             lastSpeaker = "unknown";
+            if (r != null && r.wav != null) LockedListener.discard(r.wav);
+            runOnUiThread(() -> status(r == null
+                    ? "Capture failed."
+                    : "Heard no clear near-field speech (" + r.describe() + "). Speak clearly and tap Talk."));
+            return;
+        }
+        boolean lockEnabled = prefs == null || prefs.getBoolean("voice_lock_enabled", true);
+        if (!voiceGate.isEnrolled() && r.print != null && r.quality >= 0.22) {
+            // Auto-lock to the wearer's voice on first clear utterance
+            enrolTakes = new float[][]{r.print, r.print};
+            voiceGate.enroll(Arrays.asList(r.print, r.print));
+            saveVoicePrint();
+            OwnerPrintPrefs.save(this, enrolTakes);
+            lastSpeaker = "wearer";
             runOnUiThread(() -> {
-                status(r == null ? "Capture failed." : "Heard nothing: " + r.describe());
-                listen(null);
+                refreshVoiceLabel();
+                status("🔒 My Voice auto-locked (" + voiceGate.describe() + ") — transcribing…");
+                showMainLiveCaption("🔒 My Voice Lock calibrated to your voiceprint ✓");
             });
+            listen(r.wav);
             return;
         }
         SpeakerGate.Verdict v = voiceGate.isEnrolled() && r.print != null ? voiceGate.verify(r.print) : null;
-        lastSpeaker = v == null ? "unknown" : v.accept ? "wearer" : v.knownVisitor ? "other" : "unknown";
+        boolean acceptedWearer = (v == null)
+                || v.accept
+                || (v.score >= Math.max(0.75, voiceGate.getThreshold() - 0.04));
+        if (lockEnabled && voiceGate.isEnrolled() && !acceptedWearer) {
+            lastSpeaker = "other";
+            LockedListener.discard(r.wav);
+            final int pct = Math.max(0, (int) Math.round(v.score * 100));
+            runOnUiThread(() -> {
+                status("🛡️ My Voice Lock: ignored bystander voice (" + pct + "% match). Only your voice is accepted.");
+                showMainLiveCaption("🛡️ My Voice Lock: blocked bystander speech (" + pct + "% match)");
+            });
+            return;
+        }
+        lastSpeaker = acceptedWearer ? "wearer" : (v != null && v.knownVisitor ? "other" : "unknown");
         String note = "Heard " + lastSpeaker + " \u2014 " + r.describe();
         runOnUiThread(() -> status(note));
         listen(r.wav);
@@ -1142,7 +1171,14 @@ public class MainActivity extends Activity {
      */
     private void drainKeptUtterances() {
         keptQueue.clear();
-        keptQueue.addAll(LockedListener.keptOnDisk(this));
+        long cutoff = System.currentTimeMillis() - 90_000L;
+        for (File f : LockedListener.keptOnDisk(this)) {
+            if (f.lastModified() < cutoff) {
+                LockedListener.discard(f);
+            } else {
+                keptQueue.add(f);
+            }
+        }
         if (keptQueue.isEmpty()) return;
         status("Screen-off audio waiting to be transcribed: " + keptQueue.size() + ".");
         transcribeNextKept();
@@ -1204,9 +1240,14 @@ public class MainActivity extends Activity {
         return mainDetector;
     }
 
+    private long lastMainRollingFrameAt = 0L;
+
     private void pushMainRollingFrame(Bitmap bmp) {
         if (bmp == null) return;
+        long now = System.currentTimeMillis();
         synchronized (mainRollingFrames) {
+            if (!mainRollingFrames.isEmpty() && now - lastMainRollingFrameAt < 420) return;
+            lastMainRollingFrameAt = now;
             if (mainRollingFrames.size() >= 4) mainRollingFrames.removeFirst();
             mainRollingFrames.addLast(bmp);
         }
@@ -1415,6 +1456,18 @@ public class MainActivity extends Activity {
             final Bitmap primary = bmp;
             final RectF fBox = bestFace;
             final RectF bBox = bestBody;
+            final CharacterBoard.LiveFrameSupplier supplier = new CharacterBoard.LiveFrameSupplier() {
+                @Override public Bitmap captureFreshFrame() {
+                    byte[] cur = lastMainJpeg;
+                    if (cur == null) return primary;
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inSampleSize = 2;
+                    return BitmapFactory.decodeByteArray(cur, 0, cur.length, opts);
+                }
+                @Override public Detector getDetector() {
+                    return getMainDetector();
+                }
+            };
             runOnUiThread(() -> CharacterBoard.showSavePersonDialog(
                     this,
                     frames,
@@ -1422,6 +1475,7 @@ public class MainActivity extends Activity {
                     fBox,
                     bBox,
                     glassesMode ? "Glasses Spotter HUD" : "Phone Spotter HUD",
+                    supplier,
                     saved -> {
                         etGoal.setText(saved.name);
                         try {
@@ -1447,20 +1501,52 @@ public class MainActivity extends Activity {
     }
 
     private void voiceTap() {
+        boolean lockEnabled = prefs == null || prefs.getBoolean("voice_lock_enabled", true);
         if (voiceGate.isEnrolled()) {
             new AlertDialog.Builder(this)
-                    .setTitle("Voice gate")
-                    .setMessage("Your voice is enrolled: " + voiceGate.describe()
-                            + "\n\nThis is a convenience, never a password. It only decides whether a turn "
-                            + "came from you or from somebody else, so only your own voice can silence the coach. "
-                            + "It never identifies anybody, and it never names anyone.")
-                    .setPositiveButton("Re-take (3 takes)", (d, w) -> enrolVoice())
-                    .setNeutralButton("Forget my voice", (d, w) -> forgetVoice())
-                    .setNegativeButton("Close", null)
+                    .setTitle("🔒 Wearer-Only Voice Lock")
+                    .setMessage("Your voiceprint is enrolled & locked: " + voiceGate.describe()
+                            + "\n\n• Wearer-Only Lock: " + (lockEnabled ? "ACTIVE (bystanders are ignored on Home & Live Calls)" : "PAUSED")
+                            + "\n\nOnly your voice is accepted when speaking to Spotter or Muse Live.")
+                    .setPositiveButton("⚡ 1-Tap Quick Re-Lock", (d, w) -> quickEnrolSingleVoice())
+                    .setNeutralButton("3-Take Calibration", (d, w) -> enrolVoice())
+                    .setNegativeButton("Forget Voice", (d, w) -> forgetVoice())
                     .show();
             return;
         }
-        enrolVoice();
+        new AlertDialog.Builder(this)
+                .setTitle("🔒 Lock to My Voice Only")
+                .setMessage("Enroll your voiceprint so Spotter and Muse Live ONLY respond to YOUR voice and ignore bystanders talking nearby.")
+                .setPositiveButton("⚡ Quick Lock (1 Sentence)", (d, w) -> quickEnrolSingleVoice())
+                .setNeutralButton("Full 3-Take Calibration", (d, w) -> enrolVoice())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void quickEnrolSingleVoice() {
+        if (!VoiceCapture.available(this)) {
+            Toast.makeText(this, "Microphone permission is needed to lock your voice.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        status("🎙️ Speak one normal sentence now to lock exclusively to your voice…");
+        showMainLiveCaption("🎙️ Speak a sentence to lock Spotter to your voice…");
+        VoiceCapture.capture(this, r -> {
+            if (r == null || !r.spoken() || r.print == null) {
+                runOnUiThread(() -> status("Could not hear a clear sentence — tap Voice to try again."));
+                return;
+            }
+            enrolTakes = new float[][]{r.print, r.print};
+            voiceGate.enroll(Arrays.asList(r.print, r.print));
+            if (prefs != null) prefs.edit().putBoolean("voice_lock_enabled", true).apply();
+            saveVoicePrint();
+            OwnerPrintPrefs.save(this, enrolTakes);
+            LockedListener.discard(r.wav);
+            runOnUiThread(() -> {
+                refreshVoiceLabel();
+                status("🔒 My Voice Lock active (" + voiceGate.describe() + ") — bystanders will be ignored!");
+                showMainLiveCaption("🔒 My Voice Lock active ✓ Only your voice is accepted");
+            });
+        });
     }
 
     /** Three takes, enrolled together, so one bad microphone moment cannot claim the gate. */

@@ -1,5 +1,6 @@
 package tech.nullai.fieldkit.live;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.AudioAttributes;
@@ -17,6 +18,8 @@ import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +33,10 @@ import okio.ByteString;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import tech.nullai.fieldkit.voice.OwnerPrintPrefs;
+import tech.nullai.fieldkit.voice.SpeakerGate;
+import tech.nullai.fieldkit.voice.VoicePrint;
 
 /**
  * A real full-duplex voice call with Muse over Gemini Live.
@@ -61,12 +68,14 @@ public final class LiveCall {
         void onLevel(boolean muse, float level);
         void onText(String text, boolean fromUser);
         void onEnded(String reason);
+        default void onVoiceLockNotice(String notice, boolean blockedBystander) {}
     }
 
     public static final int IN_RATE = 16000;
     public static final int OUT_RATE = 24000;
     /** 40 ms of 16 kHz mono PCM16 — small enough to feel live, big enough to be cheap. */
     private static final int IN_CHUNK = 1280;
+    private static final byte[] ZERO_CHUNK = new byte[IN_CHUNK];
     private static final int VIDEO_MAX_FPS = 3;
     private static final int MAX_RECONNECTS = 4;
 
@@ -77,6 +86,21 @@ public final class LiveCall {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService videoExec = Executors.newSingleThreadExecutor();
     private volatile boolean videoSendBusy = false;
+
+    private Context appCtx;
+    private SpeakerGate speakerGate = new SpeakerGate();
+    private volatile boolean voiceLockEnabled = true;
+    private volatile boolean pendingManualEnroll = false;
+    private final List<float[]> autoEnrollTakes = new ArrayList<>();
+    private final short[] voicedRing = new short[IN_RATE * 64 / 100]; // 640 ms of 16 kHz speech
+    private int voicedRingWrite = 0;
+    private int voicedSamplesAccum = 0;
+    private int chunksSinceVerify = 0;
+    private int speechHangoverChunks = 0;
+    private int bystanderBlockChunks = 0;
+    private volatile long lastWearerSpeechMs = 0L;
+    private volatile long lastBystanderNoticeMs = 0L;
+    private volatile long blockedBystanderCount = 0L;
 
     private final OkHttpClient http;
     private WebSocket ws;
@@ -167,6 +191,72 @@ public final class LiveCall {
     public void setMuted(boolean m) { muted = m; }
 
     public void setVideoEnabled(boolean on) { videoEnabled = on; }
+
+    /** Configures the Wearer-Only Voice Lock ("My Voice Only") using the phone's enrolled voiceprint. */
+    public void configureVoiceLock(Context ctx, boolean enabled) {
+        if (ctx != null) {
+            this.appCtx = ctx.getApplicationContext();
+            this.speakerGate = OwnerPrintPrefs.load(this.appCtx);
+        }
+        this.voiceLockEnabled = enabled;
+    }
+
+    public void setVoiceLockEnabled(boolean enabled) {
+        this.voiceLockEnabled = enabled;
+        if (!enabled) {
+            bystanderBlockChunks = 0;
+        }
+    }
+
+    public boolean isVoiceLockEnabled() {
+        return voiceLockEnabled;
+    }
+
+    public boolean isVoiceEnrolled() {
+        return speakerGate != null && speakerGate.isEnrolled();
+    }
+
+    public long blockedBystanderCount() {
+        return blockedBystanderCount;
+    }
+
+    /** Triggers an immediate 1-tap voiceprint lock on the wearer's current/next spoken phrase. */
+    public void lockCurrentVoiceNow() {
+        synchronized (voicedRing) {
+            if (voicedSamplesAccum >= IN_RATE * 35 / 100) {
+                float[] print = VoicePrint.fromPcm(snapshotVoicedRing(), IN_RATE);
+                if (print != null) {
+                    enrollAndPersistSingle(print);
+                    main.post(() -> listener.onVoiceLockNotice(
+                            "🔒 My Voice Lock calibrated to your voice!", false));
+                    return;
+                }
+            }
+        }
+        pendingManualEnroll = true;
+        main.post(() -> listener.onVoiceLockNotice(
+                "🎙️ Speak a short sentence now to lock exclusively to your voice…", false));
+    }
+
+    private short[] snapshotVoicedRing() {
+        short[] out = new short[voicedRing.length];
+        int n = voicedRing.length;
+        for (int i = 0; i < n; i++) {
+            out[i] = voicedRing[(voicedRingWrite + i) % n];
+        }
+        return out;
+    }
+
+    private void enrollAndPersistSingle(float[] print) {
+        if (print == null) return;
+        List<float[]> takes = new ArrayList<>();
+        takes.add(print);
+        takes.add(print);
+        speakerGate.enroll(takes);
+        if (appCtx != null) {
+            OwnerPrintPrefs.save(appCtx, new float[][]{print, print});
+        }
+    }
 
     // ------------------------------------------------------------------ connect
 
@@ -299,9 +389,14 @@ public final class LiveCall {
         }
     }
 
-    /** Continuous capture: runs from connect until hangUp, with no gating. */
+    /**
+     * Continuous capture with Near-Field VAD Silence Gate + Wearer-Only Voiceprint Lock:
+     * - Sends clean digital zero-PCM during silence so background hiss never triggers phantom letters or Spanish.
+     * - Verifies active speech against the wearer's voiceprint (SpeakerGate) and blocks bystanders.
+     */
     private void micLoop() {
         byte[] buf = new byte[IN_CHUNK];
+        int silenceTick = 0;
         while (running && record != null) {
             int n;
             try {
@@ -314,8 +409,99 @@ public final class LiveCall {
             micLevel = lvl;
             if ((levelUpdates++ & 1) == 0) main.post(() -> listener.onLevel(false, lvl));
             if (!setUp || muted) continue;
-            byte[] chunk = (n == buf.length) ? buf.clone() : java.util.Arrays.copyOf(buf, n);
-            sendAudio(chunk);
+
+            // Near-field voice activity threshold (filters room hiss / distant chatter)
+            boolean isSpeech = lvl >= 0.048f;
+            if (isSpeech) {
+                speechHangoverChunks = 8; // 320 ms smooth speech tail
+                appendVoicedPcm(buf, n);
+                chunksSinceVerify++;
+
+                if (voiceLockEnabled && voicedSamplesAccum >= IN_RATE * 40 / 100 && chunksSinceVerify >= 6) {
+                    chunksSinceVerify = 0;
+                    float[] print;
+                    synchronized (voicedRing) {
+                        print = VoicePrint.fromPcm(snapshotVoicedRing(), IN_RATE);
+                    }
+                    if (print != null) {
+                        if (pendingManualEnroll) {
+                            pendingManualEnroll = false;
+                            enrollAndPersistSingle(print);
+                            bystanderBlockChunks = 0;
+                            main.post(() -> listener.onVoiceLockNotice(
+                                    "🔒 My Voice Lock calibrated — ignoring all other voices!", false));
+                        } else if (!speakerGate.isEnrolled()) {
+                            // Auto-lock on the wearer's first 2 clear near-field utterances
+                            if (lvl >= 0.09f) {
+                                autoEnrollTakes.add(print);
+                                if (autoEnrollTakes.size() >= 2) {
+                                    speakerGate.enroll(autoEnrollTakes);
+                                    if (appCtx != null) {
+                                        OwnerPrintPrefs.save(appCtx, autoEnrollTakes.toArray(new float[0][]));
+                                    }
+                                    main.post(() -> listener.onVoiceLockNotice(
+                                            "🔒 My Voice auto-locked to your voiceprint ✓", false));
+                                }
+                            }
+                        } else {
+                            SpeakerGate.Verdict v = speakerGate.verify(print);
+                            // Allow small AEC/NS spectral tolerance for live full-duplex mic
+                            boolean isWearer = v.accept || v.score >= Math.max(0.75, speakerGate.getThreshold() - 0.05);
+                            if (!isWearer) {
+                                bystanderBlockChunks = 14; // Block ~560 ms of bystander speech
+                                blockedBystanderCount++;
+                                long now = System.currentTimeMillis();
+                                if (now - lastBystanderNoticeMs > 3800) {
+                                    lastBystanderNoticeMs = now;
+                                    final int scorePct = Math.max(0, (int) Math.round(v.score * 100));
+                                    main.post(() -> listener.onVoiceLockNotice(
+                                            "🛡️ My Voice Lock: ignored bystander voice (" + scorePct + "% match)", true));
+                                }
+                            } else {
+                                bystanderBlockChunks = 0;
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (speechHangoverChunks > 0) {
+                    speechHangoverChunks--;
+                } else {
+                    voicedSamplesAccum = 0;
+                    chunksSinceVerify = 0;
+                }
+            }
+
+            if (voiceLockEnabled && bystanderBlockChunks > 0) {
+                bystanderBlockChunks--;
+                // Send digital zero-PCM so the bystander's words never reach Gemini Live
+                sendAudio(ZERO_CHUNK);
+                continue;
+            }
+
+            if (isSpeech || speechHangoverChunks > 0) {
+                lastWearerSpeechMs = System.currentTimeMillis();
+                byte[] chunk = (n == buf.length) ? buf.clone() : java.util.Arrays.copyOf(buf, n);
+                sendAudio(chunk);
+            } else {
+                // During silence, send clean digital zero-PCM every 2nd tick (80ms) to keep stream clock
+                // alive while preventing room noise from causing phantom letters or Spanish drift
+                if (((silenceTick++) & 1) == 0) {
+                    sendAudio(ZERO_CHUNK);
+                }
+            }
+        }
+    }
+
+    private void appendVoicedPcm(byte[] pcm, int bytes) {
+        synchronized (voicedRing) {
+            int n = voicedRing.length;
+            for (int i = 0; i + 1 < bytes; i += 2) {
+                short s = (short) ((pcm[i] & 0xFF) | (pcm[i + 1] << 8));
+                voicedRing[voicedRingWrite] = s;
+                voicedRingWrite = (voicedRingWrite + 1) % n;
+                if (voicedSamplesAccum < n) voicedSamplesAccum++;
+            }
         }
     }
 
@@ -551,19 +737,27 @@ public final class LiveCall {
             if (ot != null && ot.has("text")) {
                 String t = ot.optString("text", "");
                 if (!t.isEmpty()) {
+                    // Once Muse starts speaking, finalize the previous user transcript buffer
+                    if (userTurnBuf.length() > 0) userTurnBuf.setLength(0);
                     museTurnBuf.append(t);
-                    final String cur = museTurnBuf.toString().trim();
-                    main.post(() -> listener.onText(cur, false));
+                    final String cur = sanitizeTranscript(museTurnBuf.toString(), false);
+                    if (!cur.isEmpty()) {
+                        main.post(() -> listener.onText(cur, false));
+                    }
                 }
             }
             JSONObject it = sc.optJSONObject("inputTranscription");
             if (it != null && it.has("text")) {
-                String t = it.optString("text", "");
-                if (!t.isEmpty()) {
-                    userTurnBuf.append(t);
-                    final String cur = userTurnBuf.toString().trim();
-                    main.post(() -> listener.onText(cur, true));
-                    userTurnBuf.setLength(0);
+                // Ignore phantom input transcriptions if the wearer has not spoken recently
+                if (System.currentTimeMillis() - lastWearerSpeechMs <= 4500) {
+                    String t = it.optString("text", "");
+                    if (!t.isEmpty()) {
+                        userTurnBuf.append(t);
+                        final String cur = sanitizeTranscript(userTurnBuf.toString(), true);
+                        if (!cur.isEmpty()) {
+                            main.post(() -> listener.onText(cur, true));
+                        }
+                    }
                 }
             }
             if (sc.optBoolean("turnComplete", false) || sc.optBoolean("interrupted", false)) {
@@ -574,6 +768,38 @@ public final class LiveCall {
         } catch (Exception e) {
             Log.w(TAG, "frame parse: " + e.getMessage());
         }
+    }
+
+    /**
+     * Filters out non-Latin script hallucinations, isolated 1-character mic noise pops,
+     * and common Spanish/foreign filler tokens caused by ambient noise.
+     */
+    private static String sanitizeTranscript(String raw, boolean isUser) {
+        if (raw == null) return "";
+        // Strip non-Latin scripts (CJK, Cyrillic, Arabic, Devanagari, etc.) while keeping English & basic punctuation
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if ((c >= 0x20 && c <= 0x7E) || c == '\u2019' || c == '\u2014' || c == '\u2026') {
+                sb.append(c);
+            } else if (Character.isWhitespace(c)) {
+                sb.append(' ');
+            }
+        }
+        String clean = sb.toString().replaceAll("\\s+", " ").trim();
+        if (clean.isEmpty()) return "";
+        if (isUser) {
+            String lower = clean.toLowerCase(java.util.Locale.US);
+            // Filter isolated 1-2 char phantom letters or Spanish noise syllables unless it's "hi", "ok", "no", "go"
+            if (clean.length() <= 2 && !lower.equals("hi") && !lower.equals("ok")
+                    && !lower.equals("no") && !lower.equals("go")) {
+                return "";
+            }
+            if (lower.equals("si") || lower.equals("eh") || lower.equals("ah") || lower.equals("uh")) {
+                return "";
+            }
+        }
+        return clean;
     }
 
     private static float rms(byte[] pcm, int n) {
