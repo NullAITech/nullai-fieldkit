@@ -265,8 +265,11 @@ public final class CallActivity extends Activity {
         if (videoOn) {
             if (eyesGlasses) {
                 if (camFeed != null) { camFeed.stop(); camFeed = null; }
+                if (!DatGlasses.INSTANCE.isStreaming() && !DatGlasses.INSTANCE.isConnecting()) {
+                    try { DatGlasses.INSTANCE.connect(); } catch (Throwable ignored) { }
+                }
                 setState(DatGlasses.INSTANCE.isStreaming() ? "Eyes: the glasses feed the call."
-                        : "Eyes: glasses selected — waiting for the glasses stream (connect them from home).");
+                        : "Eyes: glasses selected — connecting live glasses stream…");
             } else if (camFeed == null) {
                 camFeed = new CamFeed(this, (jpeg, w, h) -> {
                     if (!eyesGlasses) onEyesFrame(jpeg);

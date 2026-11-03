@@ -610,14 +610,19 @@ public class MainActivity extends Activity {
         btnConnect.setText(glassesMode ? "Connect glasses" : "Connect");
         status("Disconnected.");
         // First run: quick goal-mode setup (network / repair / adventure / custom).
-        SharedPreferences gp = getSharedPreferences("fieldkit", MODE_PRIVATE);
-        if (!gp.getBoolean("goal_mode_asked", false)) {
-            gp.edit().putBoolean("goal_mode_asked", true).apply();
-            btnConnect.post(this::showModePicker);
+        if (!isFinishing() && !isDestroyed()) {
+            SharedPreferences gp = getSharedPreferences("fieldkit", MODE_PRIVATE);
+            if (!gp.getBoolean("goal_mode_asked", false)) {
+                gp.edit().putBoolean("goal_mode_asked", true).apply();
+                btnConnect.post(() -> {
+                    if (!isFinishing() && !isDestroyed()) showModePicker();
+                });
+            }
         }
     }
 
     private void showModePicker() {
+        if (isFinishing() || isDestroyed()) return;
         ModePicker.show(this, http, relayBase(), token(),
                 (key, label) -> status("Goal mode: " + label + ". Change anytime in ⋯ options."));
     }
@@ -1193,7 +1198,21 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
+        DatGlasses.INSTANCE.forceDevMode(this);
         DatGlasses.INSTANCE.handleIntent(data);
+        if (code == 0 && glassesMode) {
+            // RegistrationManagerImpl.launchIntentForResult uses requestCode 0 when Activity
+            // is not a ComponentActivity. Restore devMode and proceed once Meta AI returns.
+            Log.i("DatGlasses", "onActivityResult(code=0, result=" + result + ") from Meta AI registration");
+            DatGlasses.INSTANCE.forceDevMode(this);
+            btnConnect.postDelayed(() -> {
+                if (glassesMode && !DatGlasses.INSTANCE.isStreaming() && !DatGlasses.INSTANCE.isConnecting()) {
+                    pendingRegistration = false;
+                    DatGlasses.INSTANCE.connect();
+                }
+            }, 600);
+            return;
+        }
         if (code == REQ_DAT_CAM) {
             boolean granted = DatGlasses.INSTANCE.parseCameraPermissionResult(result, data);
             if (!granted) {
@@ -1845,6 +1864,7 @@ public class MainActivity extends Activity {
         drainKeptUtterances();
         // Returning from the Meta AI registration card: continue the glasses flow the
         // moment the SDK reports REGISTERED, which is what unblocks the session.
+        DatGlasses.INSTANCE.forceDevMode(this);
         if (pendingRegistration && glassesMode) {
             if (DatGlasses.INSTANCE.isRegistered()) {
                 pendingRegistration = false;

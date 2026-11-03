@@ -23,7 +23,10 @@ import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.SpecificDeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
+import com.meta.wearable.dat.core.types.DeviceCompatibility
 import com.meta.wearable.dat.core.types.DeviceIdentifier
+import com.meta.wearable.dat.core.types.DonState
+import com.meta.wearable.dat.core.types.HingeState
 import com.meta.wearable.dat.core.types.LinkState
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
@@ -78,6 +81,7 @@ object DatGlasses {
     private var errJob: Job? = null
     private var sessErrJob: Job? = null
     private var registrationJob: Job? = null
+    private var deviceWatcherJob: Job? = null
 
     @Volatile
     private var frameCount = 0
@@ -95,6 +99,7 @@ object DatGlasses {
     /** One escalation per process so a broken link cannot relaunch Meta AI in a loop. */
     @Volatile private var escalatedRegistration = false
     @Volatile private var selfHealedDevMode = false
+    @Volatile private var askedCameraPermThisSession = false
 
     fun attachActivity(activity: Activity) {
         currentActivity = activity
@@ -112,7 +117,10 @@ object DatGlasses {
     private fun continueRegistration(req: RegistrationRequest, activity: Activity, from: String) {
         try {
             req.continueRegistration(activity)
-                .onSuccess { Log.i(TAG, "continueRegistration($from) OK flow=${req.flowId}") }
+                .onSuccess {
+                    Log.i(TAG, "continueRegistration($from) OK flow=${req.flowId}")
+                    forceDevMode(appCtx)
+                }
                 .onFailure { e, _ -> Log.e(TAG, "continueRegistration($from) failed: ${e.description}") }
         } catch (t: Throwable) {
             Log.e(TAG, "continueRegistration($from) exception", t)
@@ -131,6 +139,7 @@ object DatGlasses {
                 val r = Wearables.initialize(c)
                 initialized = r.isSuccess
                 r.onFailure { e, _ -> Log.e(TAG, "Wearables.initialize failed: ${e.description}") }
+                forceDevMode(c)
                 Log.i(TAG, "Wearables.initialize -> $initialized (devMode=${Wearables.isDevMode})")
             } catch (t: Throwable) {
                 Log.e(TAG, "Wearables.initialize exception", t)
@@ -141,9 +150,36 @@ object DatGlasses {
         if (initialized && registrationJob == null) {
             registrationJob = scope.launch {
                 try {
-                    Wearables.registrationState.collect { st -> Log.i(TAG, "registrationState -> $st") }
+                    Wearables.registrationState.collect { st ->
+                        Log.i(TAG, "registrationState -> $st")
+                        if (st.toString().contains("Registered", ignoreCase = true)) {
+                            forceDevMode(appCtx)
+                        }
+                    }
                 } catch (t: Throwable) {
                     Log.e(TAG, "registrationState collect failed", t)
+                }
+            }
+        }
+        if (initialized && deviceWatcherJob == null) {
+            deviceWatcherJob = scope.launch {
+                var wasReady = false
+                while (true) {
+                    try {
+                        val metaMap = Wearables.devicesMetadata
+                        val anyConnected = metaMap.values.any { flow ->
+                            val d = flow.value
+                            d.linkState == LinkState.CONNECTED &&
+                                d.hingeState != HingeState.CLOSED &&
+                                d.donState != DonState.DOFFED
+                        }
+                        if (anyConnected && !wasReady && listener != null && !isStreaming() && !isConnecting()) {
+                            Log.i(TAG, "Glasses woke up / link connected (${diagnostics()}) — auto-connecting")
+                            connect()
+                        }
+                        wasReady = anyConnected
+                    } catch (_: Throwable) {}
+                    delay(1500)
                 }
             }
         }
@@ -151,7 +187,15 @@ object DatGlasses {
 
     fun handleIntent(intent: Intent?) {
         if (!initialized || intent == null) return
+        forceDevMode(appCtx)
         try {
+            // If Meta AI returned an activity result with is_dev_mode extra (requestCode == 0),
+            // capture it even when MainActivity is a plain android.app.Activity.
+            if (intent.hasExtra(KEY_DEV_MODE)) {
+                val dm = intent.getBooleanExtra(KEY_DEV_MODE, true)
+                Log.i(TAG, "handleIntent received $KEY_DEV_MODE=$dm from Meta AI result")
+                forceDevMode(appCtx)
+            }
             // The callback receives a RegistrationRequest, NOT an error. Dropping
             // it (previous behaviour) kills the flow: DAT then reports
             // "No wearable devices have been discovered or registered".
@@ -182,10 +226,40 @@ object DatGlasses {
         if (!initialized) return
         try {
             currentActivity = activity
+            forceDevMode(activity.applicationContext)
             Log.i(TAG, "startRegistration (devMode=${Wearables.isDevMode} reg=${registrationState()})")
             Wearables.startRegistration(activity)
+            // RegistrationManagerImpl.askRegistration() sets this.devMode = false in memory and
+            // only restores it if the host Activity is a ComponentActivity. Restore it immediately.
+            forceDevMode(activity.applicationContext)
         } catch (t: Throwable) {
             listener?.onStatus("Open Meta AI app to register glasses: ${t.message}")
+        }
+    }
+
+    /**
+     * RegistrationManagerImpl.askRegistration() clobbers `this.devMode = false` in memory and
+     * only restores it via ComponentActivity's ActivityResultLauncher. Since MainActivity
+     * extends android.app.Activity, restore both SharedPreferences and the in-memory field.
+     */
+    fun forceDevMode(c: Context? = appCtx) {
+        if (c != null) ensureDevModeState(c)
+        if (!isDevApp()) return
+        try {
+            val wearablesImplField = Wearables::class.java.getDeclaredField("instance")
+            wearablesImplField.isAccessible = true
+            val wearablesImpl = wearablesImplField.get(Wearables) ?: return
+            val regMgrField = wearablesImpl.javaClass.getDeclaredField("registrationManager")
+            regMgrField.isAccessible = true
+            val regMgr = regMgrField.get(wearablesImpl) ?: return
+            val devModeField = regMgr.javaClass.getDeclaredField("devMode")
+            devModeField.isAccessible = true
+            if (!devModeField.getBoolean(regMgr)) {
+                devModeField.setBoolean(regMgr, true)
+                Log.i(TAG, "forceDevMode -> restored RegistrationManagerImpl.devMode=true in memory")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "forceDevMode reflection note: ${t.message}")
         }
     }
 
@@ -417,79 +491,172 @@ object DatGlasses {
                     waitMs += 250
                 }
 
+                // Wait up to 1.2s for PeerBuildInfo (COMPATIBLE) and DeviceStateChannel (don/hinge) to settle
+                var metaWaitMs = 0L
+                while (metaWaitMs < 1200L) {
+                    val metaMap = try { Wearables.devicesMetadata } catch (_: Throwable) { emptyMap() }
+                    val ready = metaMap.values.any { flow ->
+                        try {
+                            val d = flow.value
+                            d.linkState == LinkState.CONNECTED &&
+                                d.compatibility == DeviceCompatibility.COMPATIBLE &&
+                                d.hingeState != HingeState.UNKNOWN
+                        } catch (_: Throwable) { false }
+                    }
+                    if (ready) break
+                    delay(150)
+                    metaWaitMs += 150
+                }
+
+                forceDevMode(appCtx)
+                Log.i(TAG, "Post-link diagnostics (metaWait=${metaWaitMs}ms): ${diagnostics()}")
+
+                // Check Permission.CAMERA now that the ACDC link is actually CONNECTED
+                try {
+                    val camRes = Wearables.checkPermissionStatus(Permission.CAMERA)
+                    val camStatus = camRes.getOrNull()
+                    Log.i(TAG, "Post-link checkPermissionStatus(CAMERA) -> $camStatus (err=${camRes.errorOrNull()?.description})")
+                    if (camStatus == PermissionStatus.Denied) {
+                        val act = currentActivity
+                        if (act != null && !askedCameraPermThisSession) {
+                            askedCameraPermThisSession = true
+                            Log.w(TAG, "Glasses CAMERA permission is Denied — launching Meta AI permission prompt (4101)")
+                            listener?.onStatus("Approve glasses camera permission in Meta AI…")
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                try {
+                                    act.startActivityForResult(createCameraPermissionIntent(act), 4101)
+                                } catch (t: Throwable) {
+                                    Log.e(TAG, "Failed to launch camera permission intent", t)
+                                }
+                            }
+                            return@launch
+                        }
+                    } else if (camStatus == PermissionStatus.Granted) {
+                        askedCameraPermThisSession = false
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Post-link checkPermissionStatus note: ${t.message}")
+                }
+
                 listener?.onStatus("Opening Meta glasses session… ${diagnostics()}")
 
                 var sess: DeviceSession? = null
-                var lastErrDesc = "no session"
-                val created = Wearables.createSession(AutoDeviceSelector())
-                sess = created.getOrNull()
-                if (sess == null) {
-                    lastErrDesc = created.errorOrNull()?.description ?: "AutoDeviceSelector failed"
-                    val candidateIds = LinkedHashSet<DeviceIdentifier>()
-                    try { candidateIds.addAll(Wearables.devices.value) } catch (_: Throwable) {}
-                    try { candidateIds.addAll(Wearables.devicesMetadata.keys) } catch (_: Throwable) {}
-                    for (devId in candidateIds) {
-                        val specRes = Wearables.createSession(SpecificDeviceSelector(devId))
-                        val s = specRes.getOrNull()
-                        if (s != null) {
-                            sess = s
-                            break
-                        } else {
-                            lastErrDesc = specRes.errorOrNull()?.description ?: lastErrDesc
+                var lastSessionErr = "none"
+                val maxAttempts = 6
+                for (attempt in 1..maxAttempts) {
+                    forceDevMode(appCtx)
+                    var lastErrDesc = "no session"
+                    val created = Wearables.createSession(AutoDeviceSelector())
+                    sess = created.getOrNull()
+                    if (sess == null) {
+                        lastErrDesc = created.errorOrNull()?.description ?: "AutoDeviceSelector failed"
+                        val candidateIds = LinkedHashSet<DeviceIdentifier>()
+                        try { candidateIds.addAll(Wearables.devices.value) } catch (_: Throwable) {}
+                        try { candidateIds.addAll(Wearables.devicesMetadata.keys) } catch (_: Throwable) {}
+                        for (devId in candidateIds) {
+                            val specRes = Wearables.createSession(SpecificDeviceSelector(devId))
+                            val s = specRes.getOrNull()
+                            if (s != null) {
+                                sess = s
+                                break
+                            } else {
+                                lastErrDesc = specRes.errorOrNull()?.description ?: lastErrDesc
+                            }
                         }
                     }
-                }
 
-                if (sess == null) {
-                    listener?.onStatus("No eligible glasses device: $lastErrDesc (${diagnostics()})")
-                    return@launch
-                }
-
-                session = sess
-                var lastSessionErr = "none"
-                sessErrJob?.cancel()
-                sessErrJob = scope.launch {
-                    try {
-                        sess.errors.collect { err ->
-                            lastSessionErr = err.description
-                            Log.w(TAG, "DeviceSession.errors -> ${err.name}: ${err.description}")
-                            // DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED is NOT a firmware update: the
-                            // glasses are refusing a session for a dev build they have not been told
-                            // about (the SDK asked in non-dev mode because is_dev_mode was never set).
-                            listener?.onStatus(
-                                if (err.name.contains("UPDATE_REQUIRED")) {
-                                    escalateRegistrationOnce("UPDATE_REQUIRED")
-                                    "Glasses refused the session - not a firmware update. This build is a developer app and the glasses have not approved it yet " +
-                                        "(devMode=${Wearables.isDevMode}, sdkReg=${if (registrationEverRecorded) "recorded" else "missing"}). " +
-                                        "Finishing the approval card in Meta AI, then tap Connect glasses."
-                                } else "Glasses session notice: ${err.description}")
+                    val curSess = sess
+                    if (curSess == null) {
+                        Log.w(TAG, "Attempt $attempt/$maxAttempts: createSession null ($lastErrDesc) ${diagnostics()}")
+                        if (attempt < maxAttempts) {
+                            nudgeDisconnectedDevices()
+                            delay(1500)
+                            continue
                         }
-                    } catch (_: Throwable) {}
-                }
+                        val devMeta = try {
+                            Wearables.devicesMetadata.values.mapNotNull { it.value }.firstOrNull()
+                        } catch (_: Throwable) { null }
+                        if (devMeta != null && devMeta.linkState != LinkState.CONNECTED) {
+                            listener?.onStatus(
+                                "Glasses in Bluetooth standby (${devMeta.name} link=${devMeta.linkState}). " +
+                                    "Unfold both arms and put the glasses on your face — Spotter will auto-connect."
+                            )
+                        } else {
+                            listener?.onStatus("No eligible glasses device: $lastErrDesc (${diagnostics()})")
+                        }
+                        return@launch
+                    }
 
-                Log.i(TAG, "Starting DeviceSession (devMode=${Wearables.isDevMode})")
-                sess.start()
+                    session = curSess
+                    lastSessionErr = "none"
+                    sessErrJob?.cancel()
+                    sessErrJob = scope.launch {
+                        try {
+                            curSess.errors.collect { err ->
+                                lastSessionErr = err.description
+                                Log.w(TAG, "DeviceSession.errors -> ${err.name}: ${err.description}")
+                                listener?.onStatus(
+                                    if (err.name.contains("UPDATE_REQUIRED")) {
+                                        escalateRegistrationOnce("UPDATE_REQUIRED")
+                                        "Glasses refused the session - not a firmware update. This build is a developer app and the glasses have not approved it yet " +
+                                            "(devMode=${Wearables.isDevMode}, sdkReg=${if (registrationEverRecorded) "recorded" else "missing"}). " +
+                                            "Finishing the approval card in Meta AI, then tap Connect glasses."
+                                    } else "Glasses session notice: ${err.description}")
+                            }
+                        } catch (_: Throwable) {}
+                    }
 
-                // Wait up to 8 seconds for DeviceSessionState.STARTED before calling addCamera
-                var sessWaitMs = 0L
-                while (sessWaitMs < 8000L && sess.state.value != DeviceSessionState.STARTED) {
-                    val curState = sess.state.value
-                    if (curState == DeviceSessionState.STOPPED || curState == DeviceSessionState.STOPPING) {
+                    Log.i(TAG, "Attempt $attempt/$maxAttempts: Starting DeviceSession (devMode=${Wearables.isDevMode}) ${diagnostics()}")
+                    curSess.start()
+
+                    // Wait up to 8 seconds for DeviceSessionState.STARTED before calling addCamera
+                    var sessWaitMs = 0L
+                    while (sessWaitMs < 8000L && curSess.state.value != DeviceSessionState.STARTED) {
+                        val curState = curSess.state.value
+                        if (curState == DeviceSessionState.STOPPED || curState == DeviceSessionState.STOPPING) {
+                            break
+                        }
+                        delay(120)
+                        sessWaitMs += 120
+                    }
+                    Log.i(TAG, "Attempt $attempt/$maxAttempts: DeviceSession state after ${sessWaitMs}ms -> ${curSess.state.value} (err=$lastSessionErr) ${diagnostics()}")
+
+                    if (curSess.state.value == DeviceSessionState.STARTED) {
                         break
                     }
-                    delay(120)
-                    sessWaitMs += 120
-                }
-                Log.i(TAG, "DeviceSession state after ${sessWaitMs}ms -> ${sess.state.value} (err=$lastSessionErr)")
 
-                if (sess.state.value != DeviceSessionState.STARTED) {
-                    listener?.onStatus("Glasses session=${sess.state.value} ($lastSessionErr). Keep glasses unfolded and retry.")
+                    // Check if glasses hardware state explains why the session was refused (hinge CLOSED or don DOFFED)
+                    val devMeta = try {
+                        Wearables.devicesMetadata.values.mapNotNull { it.value }.firstOrNull()
+                    } catch (_: Throwable) { null }
+                    val wearHint = when {
+                        devMeta?.hingeState == HingeState.CLOSED ->
+                            "Unfold your Ray-Ban Meta glasses arms (hinge=CLOSED)"
+                        devMeta?.donState == DonState.DOFFED ->
+                            "Put the Ray-Ban Meta glasses on your face (wear sensor=DOFFED)"
+                        else ->
+                            "Keep glasses unfolded and worn on your face (don=${devMeta?.donState ?: "?"} hinge=${devMeta?.hingeState ?: "?"})"
+                    }
+
+                    if (attempt < maxAttempts) {
+                        listener?.onStatus("$wearHint — retrying session ($attempt/$maxAttempts)…")
+                        sessErrJob?.cancel()
+                        try { curSess.stop() } catch (_: Throwable) {}
+                        delay(1800)
+                    } else {
+                        listener?.onStatus("Glasses session=${curSess.state.value} ($lastSessionErr). $wearHint and tap Connect glasses.")
+                        return@launch
+                    }
+                }
+
+                val activeSess = sess ?: return@launch
+                if (activeSess.state.value != DeviceSessionState.STARTED) {
                     return@launch
                 }
 
                 // 30 fps heads VideoFormat.SUPPPORTED_FRAME_RATES = [30, 24, 15, 7, 2]:
                 // still supported, and half the motion judder of 15.
-                val camResult = sess.addCamera(
+                val camResult = activeSess.addCamera(
                     // 24 fps: DAT's supported rates are [30, 24, 15, 7, 2], and this
                     // phone is also running a live audio call — 24 is smoother than 15
                     // without the extra decode heat of 30.
@@ -498,7 +665,7 @@ object DatGlasses {
                 val cam = camResult.getOrNull()
                 if (cam == null) {
                     listener?.onStatus("Glasses camera unavailable: ${camResult.errorOrNull()?.description}")
-                    sess.stop()
+                    activeSess.stop()
                     return@launch
                 }
                 camera = cam
