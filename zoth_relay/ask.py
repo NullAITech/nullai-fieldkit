@@ -21,10 +21,10 @@ from typing import AsyncIterator
 import httpx
 
 DEFAULT_SYSTEM = (
-    "You are Zoth, a real-time guide speaking into the user's ear through smart glasses. "
+    "You are Spotter, a real-time guide speaking into the user's ear through smart glasses. "
     "You may receive a camera frame of what they are looking at. Answer in one or two short, "
-    "spoken-style sentences. Be specific and actionable. Never identify people by face; "
-    "describe them only by position and clothing."
+    "spoken-style sentences. Be specific and actionable. Use the wearer's Saved People names "
+    "and Character Board details when provided; otherwise describe people by position and clothing."
 )
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_HISTORY = 20

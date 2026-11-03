@@ -31,9 +31,9 @@ public final class PersonDescriptor {
     public static final int BODY_GRAD = 8;
     public static final int BODY_DIMS = BODY_W * BODY_H + BODY_COL_W * BODY_COL_H * 3 + BODY_GRAD;
 
-    public static final double DEFAULT_THRESHOLD = 0.85;
-    public static final double COMBINED_THRESHOLD = 0.83;
-    public static final double MARGIN = 0.01;
+    public static final double DEFAULT_THRESHOLD = 0.74;
+    public static final double COMBINED_THRESHOLD = 0.71;
+    public static final double MARGIN = 0.008;
 
     private PersonDescriptor() {
     }

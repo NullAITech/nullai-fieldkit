@@ -40,6 +40,7 @@ class PersonSave(BaseModel):
     thumb: str | None = None
     at: float | None = None
     relation: str = ""
+    note: str = ""
 
 class PersonPatch(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
@@ -234,8 +235,16 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         ip = client_ip(request)
         live = relay.check_live(agent, ip)
         body = body or LiveTokenRequest()
+        mission = (body.mission or "").strip()
         try:
-            out = await mint_token(live, body.mission or "", body.voice or "",
+            p_lines = people_for(agent, ip).prompt_lines(limit=12)
+        except Exception:
+            p_lines = []
+        if p_lines and "[SAVED PEOPLE ROSTER]" not in mission:
+            roster = "[SAVED PEOPLE ROSTER]: " + " | ".join(p_lines)
+            mission = f"{mission}\n{roster}".strip() if mission else roster
+        try:
+            out = await mint_token(live, mission, body.voice or "",
                                    getattr(app.state, "live_transport", None))
         except LiveError as e:
             relay.audit.write("live_token", agent=agent.name, ip=ip, via="rest", result="error", status=e.status)
@@ -697,7 +706,7 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         store, ip = _people_rest(request, agent)
         try:
             p = store.save_person(body.name, body.descriptor, body.thumb or "", body.voice,
-                                  body.at, body.relation)
+                                  body.at, body.relation, body.note)
         except ValueError as e:
             raise HTTPException(400, str(e))
         relay.audit.write("people", agent=agent.name, ip=ip, via="rest", result="saved")

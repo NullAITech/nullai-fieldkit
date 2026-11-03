@@ -426,6 +426,8 @@
 <script>
   var pHero = null;
   window.addEventListener('DOMContentLoaded', function () {
+    var q = new URLSearchParams(location.search);
+    if (q.get('slide')) showSlide(parseInt(q.get('slide'), 10) || 0);
     var c = document.getElementById('heroPresence');
     pHero = Presence.mount(c, { mode: '3d', style: 'braille' });
     pHero.setState('speaking');

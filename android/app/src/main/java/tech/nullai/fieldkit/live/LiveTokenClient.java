@@ -54,11 +54,21 @@ public final class LiveTokenClient {
     private LiveTokenClient() { }
 
     public static Session mint(String relayBase, String agentToken) throws IOException {
+        return mint(relayBase, agentToken, "");
+    }
+
+    public static Session mint(String relayBase, String agentToken, String mission) throws IOException {
         String url = relayBase.replaceAll("/+$", "") + "/v1/live/token";
+        JSONObject payload = new JSONObject();
+        try {
+            if (mission != null && !mission.trim().isEmpty()) {
+                payload.put("mission", mission.trim());
+            }
+        } catch (Exception ignored) { }
         Request request = new Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer " + agentToken)
-                .post(RequestBody.create("{}",
+                .post(RequestBody.create(payload.toString(),
                         MediaType.get("application/json; charset=utf-8")))
                 .build();
         try (Response r = HTTP.newCall(request).execute()) {

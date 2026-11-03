@@ -75,6 +75,7 @@ public final class PeopleVault {
     }
 
     private static PeopleVault instance;
+    private final Context appCtx;
     private final File file;
     private final List<Person> people = new ArrayList<>();
 
@@ -84,8 +85,10 @@ public final class PeopleVault {
     }
 
     private PeopleVault(Context ctx) {
-        file = new File(ctx.getFilesDir(), FILE);
+        appCtx = ctx.getApplicationContext();
+        file = new File(appCtx.getFilesDir(), FILE);
         load();
+        syncToRelayAsync();
     }
 
     public synchronized List<Person> all() { return new ArrayList<>(people); }
@@ -359,9 +362,57 @@ public final class PeopleVault {
                 out.write(ct);
             }
             if (!tmp.renameTo(file)) throw new IllegalStateException("rename failed");
+            syncToRelayAsync();
         } catch (Exception e) {
             Log.w(TAG, "vault save failed: " + e.getClass().getSimpleName());
         }
+    }
+
+    /** Mirrors saved people (name, role, attire/notes, descriptor) to the relay's /v1/people store. */
+    public void syncToRelayAsync() {
+        final List<Person> snapshot = all();
+        if (snapshot.isEmpty() || appCtx == null) return;
+        new Thread(() -> {
+            try {
+                android.content.SharedPreferences prefs = appCtx.getSharedPreferences("fieldkit", Context.MODE_PRIVATE);
+                String relay = prefs.getString("relay", null);
+                String token = prefs.getString("token", null);
+                if (relay == null || token == null || relay.isEmpty() || token.isEmpty()) return;
+                String url = relay.replaceAll("/+$", "") + "/v1/people";
+                okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+                okhttp3.MediaType jsonType = okhttp3.MediaType.get("application/json; charset=utf-8");
+                for (Person p : snapshot) {
+                    float[] vec = (p.face != null && p.face.length > 0) ? p.face : p.body;
+                    if (vec == null || vec.length == 0) continue;
+                    StringBuilder noteSb = new StringBuilder();
+                    if (p.attire != null && !p.attire.isEmpty()) noteSb.append("Attire: ").append(p.attire);
+                    if (p.buildSummary != null && !p.buildSummary.isEmpty()) {
+                        if (noteSb.length() > 0) noteSb.append(" · ");
+                        noteSb.append("Build: ").append(p.buildSummary);
+                    }
+                    if (p.notes != null && !p.notes.isEmpty()) {
+                        if (noteSb.length() > 0) noteSb.append(" · ");
+                        noteSb.append(p.notes);
+                    }
+                    JSONObject body = new JSONObject()
+                            .put("name", p.name)
+                            .put("relation", p.role == null ? "Contact" : p.role)
+                            .put("note", noteSb.toString())
+                            .put("descriptor", json(vec));
+                    if (p.voice != null && p.voice.length > 0) {
+                        body.put("voice", json(p.voice));
+                    }
+                    okhttp3.Request req = new okhttp3.Request.Builder()
+                            .url(url)
+                            .header("Authorization", "Bearer " + token)
+                            .post(okhttp3.RequestBody.create(body.toString(), jsonType))
+                            .build();
+                    try (okhttp3.Response resp = client.newCall(req).execute()) {
+                        // best-effort sync
+                    }
+                }
+            } catch (Throwable ignored) { }
+        }, "people-relay-sync").start();
     }
 
     private static JSONArray json(float[] v) throws Exception {

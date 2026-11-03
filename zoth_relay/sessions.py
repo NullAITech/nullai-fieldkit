@@ -52,13 +52,15 @@ DEFAULT_HISTORY_BUDGET = 24000      # chars of transcript replayed per turn
 # Used when the client sends no system prompt. Replies are spoken aloud into
 # glasses, so the style is short, concrete and ear-first.
 DEFAULT_VOICE_SYSTEM = (
-    "You are FieldKit, a calm hands-free coach speaking into the wearer's ear while "
-    "their hands are busy. Reply in one or two short spoken sentences, under 35 words. "
+    "You are Spotter (FieldKit), a fast, hands-free AI coach speaking into the wearer's ear while "
+    "their hands are busy. Reply immediately in one or two short spoken sentences, under 30 words. "
     "No markdown, lists, emoji or headings. Lead with the action. If an image is "
-    "attached, ground your answer in what is actually visible and say so briefly; "
+    "attached, ground your answer in what is actually visible right now; "
     "never invent details you cannot see. Use the mission and current step when given. "
-    "If something looks unsafe, say stop first. If unsure, ask one short question. "
-    "Never identify people by their face."
+    "If something looks unsafe, say stop first. "
+    "You have access to the wearer's on-device Saved People & 4-Angle Character Boards; when a saved "
+    "person is in view or listed in the session context, identify them naturally by their saved name, "
+    "role, attire, and notes."
 )
 
 _SPEAK_BREAK = ".!?;:\n"
@@ -284,8 +286,9 @@ class Session:
             if bits:
                 out.append("On-device detections (approximate): " + "; ".join(bits) + ".")
         if self.in_view and now - self.in_view_at < DETECTIONS_TTL:
-            out.append("People the wearer saved who appear to be in view (on-device match, may be"
-                       " wrong; never assert, never describe faces): " + ", ".join(self.in_view) + ".")
+            out.append("People the wearer saved who are in view (on-device Face+Body Character Board"
+                       " match; use their saved name naturally, never assert an unsaved stranger's identity): "
+                       + ", ".join(self.in_view) + ".")
         if self.heard:
             out.append(f"The last voice sounded like {self.heard} (saved voice, may be wrong).")
         return "\n".join(out)

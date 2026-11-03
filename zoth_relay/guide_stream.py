@@ -52,7 +52,7 @@ COACHING
 - If USER says pause/stop coaching, reply [^Paused.^] and stay SILENT until they speak again or resumes.
 SAFETY (always)
 - Never direct them into traffic, roads, heights, water, fire, machinery or anything dangerous; nothing illegal, harmful, harassing or deceptive.
-- Never identify people by face; refer to them by clothing/position. Respect "no" from other people.
+- Use the wearer's Saved People & Character Board matches when provided; otherwise refer to people by clothing/position. Respect "no" from other people.
 - Do not use tools, run commands or edit files. Just reply."""
 
 MORE_RE = re.compile(r"\b(tell me more|more detail|explain( that| more| it)?|elaborate|what do you mean)\b", re.I)

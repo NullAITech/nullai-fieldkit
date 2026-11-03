@@ -1,5 +1,7 @@
 package tech.nullai.fieldkit.live;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -13,7 +15,10 @@ import android.os.Looper;
 import android.util.Base64;
 import android.util.Log;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayDeque;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -23,6 +28,7 @@ import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -61,13 +67,16 @@ public final class LiveCall {
     public static final int OUT_RATE = 24000;
     /** 40 ms of 16 kHz mono PCM16 — small enough to feel live, big enough to be cheap. */
     private static final int IN_CHUNK = 1280;
-    private static final int VIDEO_MAX_FPS = 1;
+    private static final int VIDEO_MAX_FPS = 3;
     private static final int MAX_RECONNECTS = 4;
 
     private final String relayBase;
     private final String agentToken;
+    private final String initialMission;
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService videoExec = Executors.newSingleThreadExecutor();
+    private volatile boolean videoSendBusy = false;
 
     private final OkHttpClient http;
     private WebSocket ws;
@@ -98,8 +107,13 @@ public final class LiveCall {
     private final StringBuilder userTurnBuf = new StringBuilder();
 
     public LiveCall(String relayBase, String agentToken, Listener listener) {
+        this(relayBase, agentToken, "", listener);
+    }
+
+    public LiveCall(String relayBase, String agentToken, String initialMission, Listener listener) {
         this.relayBase = relayBase;
         this.agentToken = agentToken;
+        this.initialMission = initialMission == null ? "" : initialMission;
         this.listener = listener;
         this.http = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -125,6 +139,7 @@ public final class LiveCall {
         running = false;
         speak("Ending call…");
         try { if (ws != null) ws.close(1000, "hangup"); } catch (Exception ignored) { }
+        try { videoExec.shutdownNow(); } catch (Exception ignored) { }
         stopAudio();
         main.post(() -> {
             listener.onLevel(false, 0f);
@@ -158,7 +173,7 @@ public final class LiveCall {
     private void openOnce() {
         if (!running) return;
         try {
-            LiveTokenClient.Session s = LiveTokenClient.mint(relayBase, agentToken);
+            LiveTokenClient.Session s = LiveTokenClient.mint(relayBase, agentToken, initialMission);
             setUp = false;
             speak("Calling Muse…");
             Request req = new Request.Builder().url(s.connectUrl()).build();
@@ -256,21 +271,26 @@ public final class LiveCall {
             if (track == null) {
                 int minOut = AudioTrack.getMinBufferSize(OUT_RATE,
                         AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                track = new AudioTrack.Builder()
+                AudioTrack.Builder tb = new AudioTrack.Builder()
                         .setAudioAttributes(new AudioAttributes.Builder()
                                 .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .setFlags(AudioAttributes.FLAG_LOW_LATENCY)
                                 .build())
                         .setAudioFormat(new AudioFormat.Builder()
                                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                                 .setSampleRate(OUT_RATE)
                                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                                 .build())
-                        .setBufferSizeInBytes(Math.max(minOut, OUT_RATE / 5 * 2))
-                        .setTransferMode(AudioTrack.MODE_STREAM)
-                        .build();
+                        .setBufferSizeInBytes(Math.max(minOut, OUT_RATE / 10 * 2))
+                        .setTransferMode(AudioTrack.MODE_STREAM);
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    tb.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);
+                }
+                track = tb.build();
                 track.play();
                 playThread = new Thread(this::playLoop, "live-play");
+                playThread.setPriority(Thread.MAX_PRIORITY);
                 playThread.start();
             }
         } catch (Exception e) {
@@ -355,31 +375,113 @@ public final class LiveCall {
 
     // ------------------------------------------------------------------ frames
 
-    /** Sends one JPEG from the phone camera / glasses to Muse (<= 1 fps). */
+    /** Sends one JPEG from the phone camera / glasses to Muse (up to 3 fps, non-blocking). */
     public void sendVideoFrame(byte[] jpeg) {
+        sendVideoFrameInternal(jpeg, false);
+    }
+
+    /** Forces immediate transmission of the current frame (e.g. on camera switch or call start). */
+    public void sendVideoFrameImmediate(byte[] jpeg) {
+        sendVideoFrameInternal(jpeg, true);
+    }
+
+    private void sendVideoFrameInternal(byte[] jpeg, boolean force) {
         WebSocket w = ws;
         if (w == null || !setUp || !videoEnabled || jpeg == null || jpeg.length == 0) return;
         long now = System.currentTimeMillis();
-        if (now - lastVideoMs < 1000 / VIDEO_MAX_FPS) return;
+        if (!force && (videoSendBusy || now - lastVideoMs < 1000 / VIDEO_MAX_FPS)) return;
         lastVideoMs = now;
+        videoSendBusy = true;
+        final byte[] snapshot = jpeg;
         try {
-            JSONObject blob = new JSONObject()
-                    .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
-                    .put("mimeType", "image/jpeg");
-            w.send(new JSONObject().put("realtimeInput", new JSONObject().put("video", blob)).toString());
-            videoFrames++;
-        } catch (Exception e) {
-            Log.w(TAG, "video send failed: " + e);
+            videoExec.execute(() -> {
+                try {
+                    WebSocket sock = ws;
+                    if (sock == null || !setUp || !videoEnabled) return;
+                    byte[] compact = compactJpegForLive(snapshot);
+                    JSONObject blob = new JSONObject()
+                            .put("data", Base64.encodeToString(compact, Base64.NO_WRAP))
+                            .put("mimeType", "image/jpeg");
+                    sock.send(new JSONObject().put("realtimeInput", new JSONObject().put("video", blob)).toString());
+                    videoFrames++;
+                } catch (Exception e) {
+                    Log.w(TAG, "video send failed: " + e);
+                } finally {
+                    videoSendBusy = false;
+                }
+            });
+        } catch (Exception ignored) {
+            videoSendBusy = false;
         }
     }
 
-    /** Typed turn / caption text into the live session. */
+    /** Downscales large JPEGs to <=480px @ Q72 (~16-24 KB) so frames arrive with minimal latency. */
+    private static byte[] compactJpegForLive(byte[] jpeg) {
+        if (jpeg == null || jpeg.length <= 36_000) return jpeg;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, bounds);
+            int w = bounds.outWidth, h = bounds.outHeight;
+            if (w <= 0 || h <= 0) return jpeg;
+            int sample = 1;
+            while (Math.max(w / sample, h / sample) > 640) {
+                sample *= 2;
+            }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = sample;
+            Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, opts);
+            if (bmp == null) return jpeg;
+            int bw = bmp.getWidth(), bh = bmp.getHeight();
+            int maxDim = Math.max(bw, bh);
+            if (maxDim > 480) {
+                float scale = 480f / maxDim;
+                Bitmap scaled = Bitmap.createScaledBitmap(
+                        bmp,
+                        Math.max(1, Math.round(bw * scale)),
+                        Math.max(1, Math.round(bh * scale)),
+                        true
+                );
+                if (scaled != bmp) bmp.recycle();
+                bmp = scaled;
+            }
+            ByteArrayOutputStream bos = new ByteArrayOutputStream(24_576);
+            bmp.compress(Bitmap.CompressFormat.JPEG, 72, bos);
+            bmp.recycle();
+            byte[] out = bos.toByteArray();
+            return out.length > 0 && out.length < jpeg.length ? out : jpeg;
+        } catch (Throwable t) {
+            return jpeg;
+        }
+    }
+
+    /** Sends a text turn that prompts Muse to reply immediately (turnComplete=true). */
     public void sendText(String text) {
+        sendClientContent(text, true);
+    }
+
+    /**
+     * Injects background context (Saved People roster, live Face+Body Character Board recognition,
+     * camera switches, detector telemetry) into the active Live session without interrupting ongoing
+     * speech (turnComplete=false).
+     */
+    public void sendContext(String text) {
+        sendClientContent(text, false);
+    }
+
+    private void sendClientContent(String text, boolean turnComplete) {
         WebSocket w = ws;
         if (w == null || !setUp || text == null || text.trim().isEmpty()) return;
+        String clean = text.trim();
         try {
-            w.send(new JSONObject()
-                    .put("realtimeInput", new JSONObject().put("text", text.trim())).toString());
+            JSONObject part = new JSONObject().put("text", clean);
+            JSONObject turn = new JSONObject()
+                    .put("role", "user")
+                    .put("parts", new JSONArray().put(part));
+            JSONObject clientContent = new JSONObject()
+                    .put("turns", new JSONArray().put(turn))
+                    .put("turnComplete", turnComplete);
+            w.send(new JSONObject().put("clientContent", clientContent).toString());
         } catch (Exception ignored) { }
     }
 

@@ -82,7 +82,7 @@ public final class Detector implements AutoCloseable {
         try {
             faces = FaceDetector.createFromOptions(app, FaceDetector.FaceDetectorOptions.builder()
                     .setBaseOptions(BaseOptions.builder().setModelAssetPath("models/blaze_face_short_range.tflite").build())
-                    .setRunningMode(RunningMode.IMAGE).setMinDetectionConfidence(0.5f).build());
+                    .setRunningMode(RunningMode.IMAGE).setMinDetectionConfidence(0.35f).build());
         } catch (Throwable t) { Log.w(TAG, "face detector unavailable: " + t); }
         try {
             hands = HandLandmarker.createFromOptions(app, HandLandmarker.HandLandmarkerOptions.builder()
@@ -92,7 +92,7 @@ public final class Detector implements AutoCloseable {
         try {
             objects = ObjectDetector.createFromOptions(app, ObjectDetector.ObjectDetectorOptions.builder()
                     .setBaseOptions(BaseOptions.builder().setModelAssetPath("models/efficientdet_lite0.tflite").build())
-                    .setRunningMode(RunningMode.IMAGE).setMaxResults(5).setScoreThreshold(0.45f).build());
+                    .setRunningMode(RunningMode.IMAGE).setMaxResults(6).setScoreThreshold(0.38f).build());
         } catch (Throwable t) { Log.w(TAG, "object detector unavailable: " + t); }
     }
 
@@ -186,6 +186,22 @@ public final class Detector implements AutoCloseable {
             top = Math.max(0f, face.top);
             bottom = imgH;
         }
+        return new RectF(left, top, right, bottom);
+    }
+
+    /** Estimates head/face box from the top portion of a detected person body box when BlazeFace misses a side angle. */
+    public static RectF estimateFaceFromBody(int imgW, int imgH, RectF body) {
+        if (body == null) return null;
+        float bw = body.width();
+        float bh = body.height();
+        if (bw < 16f || bh < 24f) return null;
+        float cx = body.centerX();
+        float headW = Math.max(16f, Math.min(bw * 0.52f, bh * 0.34f));
+        float headH = Math.max(16f, Math.min(bh * 0.30f, headW * 1.25f));
+        float left = Math.max(0f, cx - headW * 0.5f);
+        float right = Math.min((float) imgW, cx + headW * 0.5f);
+        float top = Math.max(0f, body.top + bh * 0.02f);
+        float bottom = Math.min((float) imgH, top + headH);
         return new RectF(left, top, right, bottom);
     }
 

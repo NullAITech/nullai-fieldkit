@@ -114,11 +114,21 @@ public final class CallActivity extends Activity {
 
         @Override public void onReady() {
             setState(videoOn ? "Muse live — voice and eyes" : "Muse live — talk normally");
-            if (!greeted && call != null) {
-                greeted = true;
-                call.sendText("Say hello to the wearer in one short warm sentence"
-                        + " and tell them what you can see.");
-                Log.i("CallStats", "greeting sent — listening for the Muse's voice");
+            if (call != null) {
+                byte[] cur = lastJpeg;
+                if (cur != null && videoOn) {
+                    call.sendVideoFrameImmediate(cur);
+                }
+                String roster = buildSavedPeopleContext();
+                if (!roster.isEmpty()) {
+                    call.sendContext(roster);
+                }
+                if (!greeted) {
+                    greeted = true;
+                    call.sendText("Say hello to the wearer in one short warm sentence"
+                            + " and tell them what you can see right now.");
+                    Log.i("CallStats", "greeting sent — listening for the Muse's voice");
+                }
             }
         }
 
@@ -224,10 +234,15 @@ public final class CallActivity extends Activity {
         use3d = getIntent().getBooleanExtra(EXTRA_ON_GLASSES, false) || DatGlasses.INSTANCE.isStreaming();
         videoOn = getIntent().getBooleanExtra(EXTRA_EYES, false) || use3d;
         eyesGlasses = use3d;
+        detectOn = true;
         sourceBtn.setText(eyesGlasses ? "Glasses" : "Phone cam");
         sourceBtn.setOnClickListener(v -> switchSource(!eyesGlasses));
         findViewById(R.id.btnRemember).setOnClickListener(v -> rememberPerson());
+        detectBtn.setText("Detect on");
         detectBtn.setOnClickListener(v -> toggleDetect());
+        if (visionTv != null) {
+            visionTv.setVisibility(View.VISIBLE);
+        }
         findViewById(R.id.btnPeople).setOnClickListener(v ->
                 startActivity(new Intent(this, PeopleActivity.class)));
         applyAvatarMode();
@@ -376,6 +391,7 @@ public final class CallActivity extends Activity {
             camFeed = null;
         }
         visionExec.shutdownNow();
+        previewExec.shutdownNow();
         if (detector != null) detector.close();
         if (DatGlasses.INSTANCE.getListener() == callEyes) {
             DatGlasses.INSTANCE.setListener(previousGlassesListener);
@@ -418,11 +434,30 @@ public final class CallActivity extends Activity {
         started = true;
         previousGlassesListener = DatGlasses.INSTANCE.getListener();
         DatGlasses.INSTANCE.setListener(callEyes);
-        call = new LiveCall(relay, token, callListener);
+        call = new LiveCall(relay, token, buildSavedPeopleContext(), callListener);
         if (videoOn) call.setVideoEnabled(true);
         call.start();
         Log.i("CallStats", "call open · relay " + relay + " · video " + use3d
                 + " · mic open until hang-up");
+    }
+
+    private String buildSavedPeopleContext() {
+        List<PeopleVault.Person> list = PeopleVault.get(this).all();
+        if (list.isEmpty()) {
+            return "[SAVED PEOPLE ROSTER]: None saved yet. If the wearer asks to identify someone, describe their attire and tell them to tap Save Person to build a 4-Angle Character Board.";
+        }
+        StringBuilder sb = new StringBuilder("[SAVED PEOPLE ROSTER (Wearer's On-Device 4-Angle Character Boards — you have full access to these saved people)]: ");
+        int count = Math.min(12, list.size());
+        for (int i = 0; i < count; i++) {
+            PeopleVault.Person p = list.get(i);
+            if (i > 0) sb.append(" | ");
+            sb.append(p.name).append(" (Role: ").append(p.role);
+            if (p.attire != null && !p.attire.isEmpty()) sb.append(", Attire: ").append(p.attire);
+            if (p.buildSummary != null && !p.buildSummary.isEmpty()) sb.append(", Frame: ").append(p.buildSummary);
+            if (p.notes != null && !p.notes.isEmpty()) sb.append(", Notes: ").append(p.notes);
+            sb.append(", Seen ").append(p.seenCount).append("x)");
+        }
+        return sb.toString();
     }
 
     private void toggleMute() {
@@ -490,6 +525,7 @@ public final class CallActivity extends Activity {
     private String lastSummary = "";
     private Detector detector;
     private final ExecutorService visionExec = Executors.newSingleThreadExecutor();
+    private final ExecutorService previewExec = Executors.newSingleThreadExecutor();
     private final Map<String, Long> announced = new HashMap<>();
 
     private void switchSource(boolean glasses) {
@@ -502,8 +538,8 @@ public final class CallActivity extends Activity {
         }
         setEyes(true);
         if (call != null && videoOn) {
-            call.sendText("(Context, no reply needed: the wearer just switched your camera to the "
-                    + (glasses ? "Meta glasses — first-person view." : "phone camera.") + ")");
+            call.sendContext("(System Context: the wearer just switched your live camera to the "
+                    + (glasses ? "Ray-Ban Meta glasses — first-person POV view." : "phone camera.") + ")");
         }
         addCaption("· eyes → " + (glasses ? "glasses" : "phone"));
     }
@@ -537,9 +573,9 @@ public final class CallActivity extends Activity {
             DemoRecorder.get().onJpegFrame(jpeg, eyesGlasses);
         }
         long now = System.currentTimeMillis();
-        if (!detectOn && now - lastPreviewPaintAt >= 95) {
+        if (!detectOn && now - lastPreviewPaintAt >= 80) {
             lastPreviewPaintAt = now;
-            visionExec.execute(() -> {
+            previewExec.execute(() -> {
                 try {
                     Bitmap bmp = decodeFrame(jpeg);
                     if (bmp != null) {
@@ -555,7 +591,7 @@ public final class CallActivity extends Activity {
             });
         }
         boolean recognise = !PeopleVault.get(this).isEmpty();
-        if ((!detectOn && !recognise) || visionBusy || now - lastVisionAt < 900) return;
+        if ((!detectOn && !recognise) || visionBusy || now - lastVisionAt < 450) return;
         lastVisionAt = now;
         visionBusy = true;
         visionExec.execute(() -> {
@@ -581,8 +617,9 @@ public final class CallActivity extends Activity {
         pushRollingFrame(bmp);
 
         PeopleVault vault = PeopleVault.get(this);
-        boolean needObjectsAndBodies = detectOn || !vault.isEmpty();
-        Detector.Result r = detector().detect(bmp, needObjectsAndBodies, detectOn);
+        boolean needBodiesAndObjects = detectOn || !vault.isEmpty();
+        // Param 2 = withHands (only needed when detectOn), Param 3 = withObjects (detects person bodies + objects)
+        Detector.Result r = detector().detect(bmp, detectOn, needBodiesAndObjects);
 
         // Cache largest face + matching body for instant Character Board generation
         RectF primaryFace = null;
@@ -599,9 +636,11 @@ public final class CallActivity extends Activity {
                     : Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), primaryFace);
         } else if (!r.bodies.isEmpty()) {
             lastBestBodyBox = new RectF(r.bodies.get(0));
+            RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), lastBestBodyBox);
+            if (estFace != null) lastBestFaceBox = estFace;
         }
 
-        // Dual Face + Body recognition
+        // Dual Face + Body recognition (checks detected faces first, then body-anchored crops if BlazeFace missed a side angle)
         List<String> seen = new ArrayList<>();
         PeopleVault.RecognitionMatch bestMatch = null;
         for (RectF f : r.faces) {
@@ -616,6 +655,18 @@ public final class CallActivity extends Activity {
                 if (bestMatch == null || m.score > bestMatch.score) bestMatch = m;
             }
         }
+        if (bestMatch == null && !r.bodies.isEmpty() && !vault.isEmpty()) {
+            for (RectF bBox : r.bodies) {
+                RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), bBox);
+                float[] faceVec = estFace != null ? descriptor(bmp, estFace) : null;
+                float[] bodyVec = bodyDescriptor(bmp, bBox);
+                PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(faceVec, bodyVec);
+                if (m != null && m.person != null) {
+                    if (!seen.contains(m.person.name)) seen.add(m.person.name);
+                    if (bestMatch == null || m.score > bestMatch.score) bestMatch = m;
+                }
+            }
+        }
 
         long now = System.currentTimeMillis();
         if (bestMatch != null && bestMatch.person != null) {
@@ -626,10 +677,10 @@ public final class CallActivity extends Activity {
         List<String> fresh = new ArrayList<>();
         for (String n : seen) {
             Long at = announced.get(n);
-            if (at == null || now - at > 60_000) { fresh.add(n); announced.put(n, now); }
+            if (at == null || now - at > 12_000) { fresh.add(n); announced.put(n, now); }
         }
         String summary = r.summary();
-        boolean sendSummary = detectOn && !summary.equals(lastSummary) && now - lastSummaryAt > 20_000;
+        boolean sendSummary = detectOn && !summary.equals(lastSummary) && now - lastSummaryAt > 10_000;
         if (sendSummary) { lastSummary = summary; lastSummaryAt = now; }
         Bitmap shown = detectOn ? drawBoxes(bmp, r) : null;
         if (shown != null) {
@@ -645,13 +696,17 @@ public final class CallActivity extends Activity {
             }
             updateRecognitionPopup(matchedForUi);
             if (call == null) return;
-            if (!fresh.isEmpty()) {
-                addCaption("· in view: " + String.join(", ", fresh));
-                call.sendText("(Context, no reply needed unless useful: an on-device Face+Body character match "
-                        + "suggests " + String.join(", ", fresh) + " — whom the wearer saved — is in view.)");
+            if (!fresh.isEmpty() && matchedForUi != null && matchedForUi.person != null) {
+                PeopleVault.Person mp = matchedForUi.person;
+                addCaption("· recognized: " + mp.name + " (" + mp.role + ")");
+                call.sendContext("[ON-DEVICE RECOGNITION MATCH]: The person currently in view is "
+                        + mp.name + " (Role: " + mp.role + ", Attire: " + mp.attire
+                        + ", Build: " + mp.buildSummary
+                        + (mp.notes != null && !mp.notes.isEmpty() ? ", Notes: " + mp.notes : "")
+                        + "). Identify them by name if the wearer asks who is in front of them.");
             }
             if (sendSummary) {
-                call.sendText("(Context, no reply needed: on-device detector sees " + summary + ".)");
+                call.sendContext("[ON-DEVICE DETECTOR]: Camera currently sees " + summary + ".");
             }
         });
     }
@@ -752,7 +807,7 @@ public final class CallActivity extends Activity {
             Bitmap bmp = decodeFrame(jpeg);
             if (bmp == null) return;
             pushRollingFrame(bmp);
-            Detector.Result r = detector().detect(bmp, true, false);
+            Detector.Result r = detector().detect(bmp, false, true);
             RectF bestFace = null;
             for (RectF f : r.faces) {
                 if (bestFace == null || f.width() * f.height() > bestFace.width() * bestFace.height()) {
@@ -765,6 +820,9 @@ public final class CallActivity extends Activity {
                     : (!r.bodies.isEmpty() ? r.bodies.get(0) : lastBestBodyBox);
             if (bestBody == null && bestFace != null) {
                 bestBody = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), bestFace);
+            }
+            if (bestFace == null && bestBody != null) {
+                bestFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), bestBody);
             }
             final RectF fBox = bestFace;
             final RectF bBox = bestBody;
@@ -784,9 +842,11 @@ public final class CallActivity extends Activity {
                                 "Saved 4-Angle Character Board for " + saved.name + " (" + saved.role + ") · " + saved.attire);
                         updateRecognitionPopup(new PeopleVault.RecognitionMatch(saved, 0.99, 0.99, 0.99));
                         if (call != null) {
-                            call.sendText("(Context: the wearer just saved the person in view as "
+                            call.sendContext(buildSavedPeopleContext());
+                            call.sendText("(System: the wearer just saved the person in front of the camera as "
                                     + saved.name + " [" + saved.role + "], attire: " + saved.attire
-                                    + ". You may use their name.)");
+                                    + (saved.notes != null && !saved.notes.isEmpty() ? ", notes: " + saved.notes : "")
+                                    + ". Confirm briefly in one sentence that you remember " + saved.name + ".)");
                         }
                     }
             ));

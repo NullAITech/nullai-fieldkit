@@ -1221,7 +1221,7 @@ public class MainActivity extends Activity {
     private void onMainCameraJpeg(byte[] jpeg, boolean fromGlasses) {
         if (jpeg == null || jpeg.length == 0) return;
         long now = System.currentTimeMillis();
-        if (mainVisionBusy || now - lastMainVisionAt < 1100) return;
+        if (mainVisionBusy || now - lastMainVisionAt < 650) return;
         lastMainVisionAt = now;
         mainVisionBusy = true;
         mainVisionExec.execute(() -> {
@@ -1233,7 +1233,7 @@ public class MainActivity extends Activity {
                 pushMainRollingFrame(bmp);
 
                 PeopleVault vault = PeopleVault.get(MainActivity.this);
-                Detector.Result r = getMainDetector().detect(bmp, !vault.isEmpty(), false);
+                Detector.Result r = getMainDetector().detect(bmp, false, !vault.isEmpty());
                 RectF primaryFace = null;
                 for (RectF f : r.faces) {
                     if (primaryFace == null || f.width() * f.height() > primaryFace.width() * primaryFace.height()) {
@@ -1250,9 +1250,13 @@ public class MainActivity extends Activity {
                         cropDesc = fVec;
                         cropDescAt = System.currentTimeMillis();
                     }
+                } else if (!r.bodies.isEmpty()) {
+                    lastMainBodyBox = new RectF(r.bodies.get(0));
+                    RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), lastMainBodyBox);
+                    if (estFace != null) lastMainFaceBox = estFace;
                 }
 
-                if (!vault.isEmpty() && !r.faces.isEmpty()) {
+                if (!vault.isEmpty() && (!r.faces.isEmpty() || !r.bodies.isEmpty())) {
                     PeopleVault.RecognitionMatch bestMatch = null;
                     for (RectF f : r.faces) {
                         float[] fVec = mainFaceDesc(bmp, f);
@@ -1264,9 +1268,30 @@ public class MainActivity extends Activity {
                             bestMatch = m;
                         }
                     }
+                    if (bestMatch == null && !r.bodies.isEmpty()) {
+                        for (RectF bBox : r.bodies) {
+                            RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), bBox);
+                            float[] fVec = estFace != null ? mainFaceDesc(bmp, estFace) : null;
+                            float[] bVec = mainBodyDesc(bmp, bBox);
+                            PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(fVec, bVec);
+                            if (m != null && m.person != null && (bestMatch == null || m.score > bestMatch.score)) {
+                                bestMatch = m;
+                            }
+                        }
+                    }
                     if (bestMatch != null && bestMatch.person != null) {
                         vault.recordSighting(bestMatch.person.id, bestMatch.score,
                                 fromGlasses ? "Glasses Spotter HUD" : "Phone Spotter HUD");
+                        try {
+                            JSONObject detMsg = new JSONObject();
+                            detMsg.put("type", "detections");
+                            detMsg.put("faces", Math.max(1, r.faces.size()));
+                            detMsg.put("pose", !r.bodies.isEmpty());
+                            JSONArray namesArr = new JSONArray();
+                            namesArr.put(bestMatch.person.name);
+                            detMsg.put("names", namesArr);
+                            sendWs(detMsg);
+                        } catch (Exception ignored) { }
                     }
                     final PeopleVault.RecognitionMatch matchUi = bestMatch;
                     runOnUiThread(() -> updateMainRecognitionPopup(matchUi));
@@ -1370,7 +1395,7 @@ public class MainActivity extends Activity {
                 bmp = frames.get(frames.size() - 1);
             }
             if (bmp == null) return;
-            Detector.Result r = getMainDetector().detect(bmp, true, false);
+            Detector.Result r = getMainDetector().detect(bmp, false, true);
             RectF bestFace = null;
             for (RectF f : r.faces) {
                 if (bestFace == null || f.width() * f.height() > bestFace.width() * bestFace.height()) {
@@ -1383,6 +1408,9 @@ public class MainActivity extends Activity {
                     : (!r.bodies.isEmpty() ? r.bodies.get(0) : lastMainBodyBox);
             if (bestBody == null && bestFace != null) {
                 bestBody = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), bestFace);
+            }
+            if (bestFace == null && bestBody != null) {
+                bestFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), bestBody);
             }
             final Bitmap primary = bmp;
             final RectF fBox = bestFace;
