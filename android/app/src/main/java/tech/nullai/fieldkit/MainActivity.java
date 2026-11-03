@@ -1259,6 +1259,9 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String mainPendingMatchId = "";
+    private int mainPendingMatchStreak = 0;
+
     private void onMainCameraJpeg(byte[] jpeg, boolean fromGlasses) {
         if (jpeg == null || jpeg.length == 0) return;
         long now = System.currentTimeMillis();
@@ -1274,7 +1277,7 @@ public class MainActivity extends Activity {
                 pushMainRollingFrame(bmp);
 
                 PeopleVault vault = PeopleVault.get(MainActivity.this);
-                Detector.Result r = getMainDetector().detect(bmp, false, !vault.isEmpty());
+                Detector.Result r = getMainDetector().detect(bmp, false, false);
                 RectF primaryFace = null;
                 for (RectF f : r.faces) {
                     if (primaryFace == null || f.width() * f.height() > primaryFace.width() * primaryFace.height()) {
@@ -1291,34 +1294,38 @@ public class MainActivity extends Activity {
                         cropDesc = fVec;
                         cropDescAt = System.currentTimeMillis();
                     }
-                } else if (!r.bodies.isEmpty()) {
-                    lastMainBodyBox = new RectF(r.bodies.get(0));
-                    RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), lastMainBodyBox);
-                    if (estFace != null) lastMainFaceBox = estFace;
+                } else {
+                    lastMainFaceBox = null;
+                    lastMainBodyBox = null;
                 }
 
-                if (!vault.isEmpty() && (!r.faces.isEmpty() || !r.bodies.isEmpty())) {
-                    PeopleVault.RecognitionMatch bestMatch = null;
+                if (!vault.isEmpty() && !r.faces.isEmpty()) {
+                    PeopleVault.RecognitionMatch rawMatch = null;
                     for (RectF f : r.faces) {
                         float[] fVec = mainFaceDesc(bmp, f);
+                        if (fVec == null) continue;
                         RectF bBox = Detector.Result.findMatchingBody(f, r.bodies);
                         if (bBox == null) bBox = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), f);
                         float[] bVec = mainBodyDesc(bmp, bBox);
                         PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(fVec, bVec);
-                        if (m != null && m.person != null && (bestMatch == null || m.score > bestMatch.score)) {
-                            bestMatch = m;
+                        if (m != null && m.person != null && (rawMatch == null || m.score > rawMatch.score)) {
+                            rawMatch = m;
                         }
                     }
-                    if (bestMatch == null && !r.bodies.isEmpty()) {
-                        for (RectF bBox : r.bodies) {
-                            RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), bBox);
-                            float[] fVec = estFace != null ? mainFaceDesc(bmp, estFace) : null;
-                            float[] bVec = mainBodyDesc(bmp, bBox);
-                            PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(fVec, bVec);
-                            if (m != null && m.person != null && (bestMatch == null || m.score > bestMatch.score)) {
-                                bestMatch = m;
-                            }
+                    PeopleVault.RecognitionMatch bestMatch = null;
+                    if (rawMatch != null && rawMatch.person != null) {
+                        if (rawMatch.person.id.equals(mainPendingMatchId)) {
+                            mainPendingMatchStreak++;
+                        } else {
+                            mainPendingMatchId = rawMatch.person.id;
+                            mainPendingMatchStreak = 1;
                         }
+                        if (mainPendingMatchStreak >= 2) {
+                            bestMatch = rawMatch;
+                        }
+                    } else {
+                        mainPendingMatchId = "";
+                        mainPendingMatchStreak = 0;
                     }
                     if (bestMatch != null && bestMatch.person != null) {
                         vault.recordSighting(bestMatch.person.id, bestMatch.score,
@@ -1337,6 +1344,8 @@ public class MainActivity extends Activity {
                     final PeopleVault.RecognitionMatch matchUi = bestMatch;
                     runOnUiThread(() -> updateMainRecognitionPopup(matchUi));
                 } else {
+                    mainPendingMatchId = "";
+                    mainPendingMatchStreak = 0;
                     runOnUiThread(() -> updateMainRecognitionPopup(null));
                 }
             } catch (Throwable ignored) {
@@ -1354,9 +1363,10 @@ public class MainActivity extends Activity {
         int x1 = Math.min(bmp.getWidth(), (int) (f.right + pw));
         int y1 = Math.min(bmp.getHeight(), (int) (f.bottom + ph));
         int w = x1 - x0, h = y1 - y0;
-        if (w < 8 || h < 8) return null;
+        if (w < 16 || h < 16) return null;
         int[] px = new int[w * h];
         bmp.getPixels(px, 0, w, x0, y0, w, h);
+        if (!PersonDescriptor.looksLikeValidFaceCrop(px, w, h)) return null;
         return PersonDescriptor.fromCrop(px, w, h);
     }
 
@@ -1378,7 +1388,7 @@ public class MainActivity extends Activity {
         if (mainPersonCardOverlay == null) return;
         long now = System.currentTimeMillis();
         if (match == null || match.person == null) {
-            if (mainPersonCardOverlay.getVisibility() == View.VISIBLE && now - mainActivePopupUpdatedAt > 6500) {
+            if (mainPersonCardOverlay.getVisibility() == View.VISIBLE && now - mainActivePopupUpdatedAt > 2800) {
                 mainPersonCardOverlay.setVisibility(View.GONE);
                 mainActivePopupPersonId = "";
             }

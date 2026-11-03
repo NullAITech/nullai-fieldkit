@@ -31,11 +31,29 @@ public final class PersonDescriptor {
     public static final int BODY_GRAD = 8;
     public static final int BODY_DIMS = BODY_W * BODY_H + BODY_COL_W * BODY_COL_H * 3 + BODY_GRAD;
 
-    public static final double DEFAULT_THRESHOLD = 0.74;
-    public static final double COMBINED_THRESHOLD = 0.71;
-    public static final double MARGIN = 0.008;
+    public static final double DEFAULT_THRESHOLD = 0.82;
+    public static final double COMBINED_THRESHOLD = 0.80;
+    public static final double MIN_FACE_THRESHOLD = 0.78;
+    public static final double MARGIN = 0.035;
 
     private PersonDescriptor() {
+    }
+
+    /** Verifies a crop has genuine facial texture/contrast and is not a flat wall, shadow, or ceiling. */
+    public static boolean looksLikeValidFaceCrop(int[] argb, int w, int h) {
+        if (argb == null || w < 16 || h < 16) return false;
+        double sum = 0, sumSq = 0;
+        int n = argb.length;
+        for (int p : argb) {
+            double l = lum(p);
+            sum += l;
+            sumSq += l * l;
+        }
+        double mean = sum / n;
+        double variance = Math.max(0.0, (sumSq / n) - (mean * mean));
+        double std = Math.sqrt(variance);
+        // Reject ultra-dark shadows, blown-out lights, or low-contrast flat walls/furniture
+        return mean >= 0.08 && mean <= 0.93 && std >= 0.055;
     }
 
     /** @param argb face crop, @param w/@param h its pixel size. */
@@ -64,11 +82,12 @@ public final class PersonDescriptor {
             fn = argb.length;
         }
         fr /= fn; fg /= fn; fb /= fn;
-        double meanLum = (0.299 * fr + 0.587 * fg + 0.114 * fb) / 255.0;
 
         float[] v = new float[DIMS];
 
-        // 8x8 grey grid, mean-centered and zonally weighted (eye band, nose bridge, mouth/jaw weighted higher than outer corners)
+        // 8x8 grey grid — strictly zero-mean & contrast-normalized so positive DC bias never causes false matches!
+        double[] gridLum = new double[GREY * GREY];
+        double gridMean = 0;
         for (int gy = 0; gy < GREY; gy++) {
             for (int gx = 0; gx < GREY; gx++) {
                 double s = 0, n = 0;
@@ -79,15 +98,26 @@ public final class PersonDescriptor {
                         n++;
                     }
                 }
-                double cellLum = (n > 0 ? s / n : meanLum);
-                boolean isCorner = ( gx == 0 || gx == GREY - 1 ) && ( gy == 0 || gy == GREY - 1 );
+                double cLum = (n > 0 ? s / n : 0.5);
+                gridLum[gy * GREY + gx] = cLum;
+                gridMean += cLum;
+            }
+        }
+        gridMean /= (GREY * GREY);
+        double gridVar = 0;
+        for (double gl : gridLum) gridVar += (gl - gridMean) * (gl - gridMean);
+        double gridStd = Math.sqrt(gridVar / (GREY * GREY)) + 0.035;
+
+        for (int gy = 0; gy < GREY; gy++) {
+            for (int gx = 0; gx < GREY; gx++) {
+                boolean isCorner = (gx == 0 || gx == GREY - 1) && (gy == 0 || gy == GREY - 1);
                 boolean isCoreFace = (gx >= 1 && gx <= 6 && gy >= 1 && gy <= 6);
-                float zoneWeight = isCorner ? 0.45f : (isCoreFace ? 1.22f : 0.85f);
-                v[gy * GREY + gx] = (float) (cellLum * zoneWeight);
+                float zoneWeight = isCorner ? 0.35f : (isCoreFace ? 1.25f : 0.80f);
+                v[gy * GREY + gx] = (float) (((gridLum[gy * GREY + gx] - gridMean) / gridStd) * zoneWeight);
             }
         }
 
-        // colour grid, light-corrected
+        // colour grid, light-corrected (zero-centered against inner face mean)
         int base = GREY * GREY;
         for (int cy = 0; cy < COL; cy++) {
             for (int cx = 0; cx < COL; cx++) {
@@ -102,13 +132,13 @@ public final class PersonDescriptor {
                     }
                 }
                 int k = base + (cy * COL + cx) * 3;
-                v[k] = (float) (n > 0 ? r / n : 0);
-                v[k + 1] = (float) (n > 0 ? g / n : 0);
-                v[k + 2] = (float) (n > 0 ? b / n : 0);
+                v[k] = (float) (n > 0 ? (r / n) / 28.0 : 0);
+                v[k + 1] = (float) (n > 0 ? (g / n) / 28.0 : 0);
+                v[k + 2] = (float) (n > 0 ? (b / n) / 28.0 : 0);
             }
         }
 
-        // gradient orientation histogram
+        // gradient orientation histogram — zero-centered around uniform (1/GRAD) so random edges don't correlate at +0.85
         int gbase = base + COL * COL * 3;
         double[] bins = new double[GRAD];
         for (int y = 1; y < h - 1; y++) {
@@ -125,12 +155,15 @@ public final class PersonDescriptor {
         }
         double sum = 0;
         for (double d : bins) sum += d;
-        for (int i = 0; i < GRAD; i++) v[gbase + i] = (float) (sum > 0 ? bins[i] / sum : 0);
+        double uniform = 1.0 / GRAD;
+        for (int i = 0; i < GRAD; i++) {
+            v[gbase + i] = (float) (sum > 0 ? ((bins[i] / sum) - uniform) * 6.0 : 0);
+        }
 
-        // grey grid dominates the norm; scale so colour/structure keep comparable weight
-        for (int i = 0; i < base; i++) v[i] *= 0.06f;
-        for (int i = base; i < gbase; i++) v[i] *= 0.5f;
-        for (int i = gbase; i < DIMS; i++) v[i] *= 3.0f;
+        // Balanced modality weighting across structure (64D), chromaticity (48D), and geometry (12D)
+        for (int i = 0; i < base; i++) v[i] *= 0.22f;
+        for (int i = base; i < gbase; i++) v[i] *= 0.32f;
+        for (int i = gbase; i < DIMS; i++) v[i] *= 1.15f;
 
         return normalize(v);
     }
@@ -188,7 +221,9 @@ public final class PersonDescriptor {
 
         float[] v = new float[BODY_DIMS];
 
-        // 4x8 vertical silhouette grid
+        // 4x8 vertical silhouette grid (zero-mean & contrast-normalized)
+        double[] bodyLum = new double[BODY_W * BODY_H];
+        double bodyMean = 0;
         for (int gy = 0; gy < BODY_H; gy++) {
             for (int gx = 0; gx < BODY_W; gx++) {
                 double s = 0, n = 0;
@@ -198,11 +233,20 @@ public final class PersonDescriptor {
                         n++;
                     }
                 }
-                v[gy * BODY_W + gx] = (float) (n > 0 ? s / n : 0);
+                double cLum = (n > 0 ? s / n : 0.5);
+                bodyLum[gy * BODY_W + gx] = cLum;
+                bodyMean += cLum;
             }
         }
+        bodyMean /= (BODY_W * BODY_H);
+        double bodyVar = 0;
+        for (double bl : bodyLum) bodyVar += (bl - bodyMean) * (bl - bodyMean);
+        double bodyStd = Math.sqrt(bodyVar / (BODY_W * BODY_H)) + 0.04;
+        for (int i = 0; i < BODY_W * BODY_H; i++) {
+            v[i] = (float) ((bodyLum[i] - bodyMean) / bodyStd);
+        }
 
-        // 4x6x3 attire colour grid
+        // 4x6x3 attire colour grid (zero-centered)
         int base = BODY_W * BODY_H;
         for (int cy = 0; cy < BODY_COL_H; cy++) {
             for (int cx = 0; cx < BODY_COL_W; cx++) {
@@ -210,20 +254,20 @@ public final class PersonDescriptor {
                 for (int y = cy * h / BODY_COL_H; y < (cy + 1) * h / BODY_COL_H; y++) {
                     for (int x = cx * w / BODY_COL_W; x < (cx + 1) * w / BODY_COL_W; x++) {
                         int p = argb[y * w + x];
-                        r += ((p >> 16) & 0xff) - fr * 0.5;
-                        g += ((p >> 8) & 0xff) - fg * 0.5;
-                        b += (p & 0xff) - fb * 0.5;
+                        r += ((p >> 16) & 0xff) - fr;
+                        g += ((p >> 8) & 0xff) - fg;
+                        b += (p & 0xff) - fb;
                         n++;
                     }
                 }
                 int k = base + (cy * BODY_COL_W + cx) * 3;
-                v[k] = (float) (n > 0 ? r / n : 0);
-                v[k + 1] = (float) (n > 0 ? g / n : 0);
-                v[k + 2] = (float) (n > 0 ? b / n : 0);
+                v[k] = (float) (n > 0 ? (r / n) / 32.0 : 0);
+                v[k + 1] = (float) (n > 0 ? (g / n) / 32.0 : 0);
+                v[k + 2] = (float) (n > 0 ? (b / n) / 32.0 : 0);
             }
         }
 
-        // 8-bin garment contour orientation histogram
+        // 8-bin garment contour orientation histogram (zero-centered around uniform)
         int gbase = base + BODY_COL_W * BODY_COL_H * 3;
         double[] bins = new double[BODY_GRAD];
         for (int y = 1; y < h - 1; y++) {
@@ -240,11 +284,14 @@ public final class PersonDescriptor {
         }
         double sum = 0;
         for (double d : bins) sum += d;
-        for (int i = 0; i < BODY_GRAD; i++) v[gbase + i] = (float) (sum > 0 ? bins[i] / sum : 0);
+        double uniform = 1.0 / BODY_GRAD;
+        for (int i = 0; i < BODY_GRAD; i++) {
+            v[gbase + i] = (float) (sum > 0 ? ((bins[i] / sum) - uniform) * 5.0 : 0);
+        }
 
-        for (int i = 0; i < base; i++) v[i] *= 0.08f;
-        for (int i = base; i < gbase; i++) v[i] *= 0.45f;
-        for (int i = gbase; i < BODY_DIMS; i++) v[i] *= 2.5f;
+        for (int i = 0; i < base; i++) v[i] *= 0.25f;
+        for (int i = base; i < gbase; i++) v[i] *= 0.35f;
+        for (int i = gbase; i < BODY_DIMS; i++) v[i] *= 1.10f;
 
         return normalize(v);
     }
@@ -257,19 +304,18 @@ public final class PersonDescriptor {
     }
 
     /**
-     * Fuses Face similarity (70%) and Body/Torso similarity (30%) when both are available,
-     * or falls back to whichever modality is present.
+     * Fuses Face similarity (76%) and Body/Torso similarity (24%) when a real face match is present.
+     * Never matches on body alone (which would trigger on chairs/coats when no face is visible).
      */
     public static double combinedSimilarity(float[] faceProbe, float[] bodyProbe,
                                             float[] faceKnown, float[] bodyKnown) {
         double sf = similarity(faceProbe, faceKnown);
+        if (sf < MIN_FACE_THRESHOLD) return -1;
         double sb = similarity(bodyProbe, bodyKnown);
-        if (sf >= 0 && sb >= 0) {
-            return sf * 0.72 + sb * 0.28;
+        if (sb >= 0) {
+            return sf * 0.76 + sb * 0.24;
         }
-        if (sf >= 0) return sf;
-        if (sb >= 0) return sb * 0.94; // body-only slightly conservative
-        return -1;
+        return sf;
     }
 
     /** Human-readable appearance telemetry extracted from a person's face + body crops. */

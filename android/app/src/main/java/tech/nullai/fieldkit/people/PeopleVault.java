@@ -1,6 +1,7 @@
 package tech.nullai.fieldkit.people;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Log;
@@ -235,11 +236,12 @@ public final class PeopleVault {
     }
 
     /**
-     * Dual-modality Face + Body matcher. Uses face (72%) + body/torso (28%) cosine similarity
-     * and checks margin against runner-up.
+     * Dual-modality Face + Body matcher. Requires a genuine face match (>= MIN_FACE_THRESHOLD)
+     * and combines face (78%) + body/torso (22%) cosine similarity with margin against runner-up.
+     * Body-only matching without a real face is disabled to prevent false positives on chairs/walls.
      */
     public synchronized RecognitionMatch matchFaceAndBody(float[] faceProbe, float[] bodyProbe) {
-        if ((faceProbe == null || faceProbe.length == 0) && (bodyProbe == null || bodyProbe.length == 0)) {
+        if (faceProbe == null || faceProbe.length == 0) {
             return null;
         }
         Person bestPerson = null;
@@ -247,20 +249,12 @@ public final class PeopleVault {
         double bestFace = -1, bestBody = -1;
 
         for (Person p : people) {
-            double sf = (faceProbe != null && faceProbe.length > 0)
-                    ? PersonDescriptor.bestMultiAngleSimilarity(faceProbe, p.face, p.angleFaces) : -1;
-            double sb = (bodyProbe != null && p.body.length == bodyProbe.length)
+            if (p.name != null && p.name.contains("(Demo)")) continue;
+            double sf = PersonDescriptor.bestMultiAngleSimilarity(faceProbe, p.face, p.angleFaces);
+            if (sf < PersonDescriptor.MIN_FACE_THRESHOLD) continue;
+            double sb = (bodyProbe != null && p.body != null && p.body.length == bodyProbe.length)
                     ? PersonDescriptor.similarity(bodyProbe, p.body) : -1;
-            double combined;
-            if (sf >= 0 && sb >= 0) {
-                combined = sf * 0.72 + sb * 0.28;
-            } else if (sf >= 0) {
-                combined = sf;
-            } else if (sb >= 0) {
-                combined = sb * 0.94;
-            } else {
-                combined = -1;
-            }
+            double combined = (sb >= 0.35) ? (sf * 0.78 + sb * 0.22) : sf;
             if (combined > bestScore) {
                 secondScore = bestScore;
                 bestScore = combined;
@@ -274,7 +268,7 @@ public final class PeopleVault {
         double threshold = (bodyProbe != null && bodyProbe.length > 0)
                 ? PersonDescriptor.COMBINED_THRESHOLD
                 : PersonDescriptor.DEFAULT_THRESHOLD;
-        if (bestPerson == null || bestScore < threshold) return null;
+        if (bestPerson == null || bestScore < threshold || bestFace < PersonDescriptor.MIN_FACE_THRESHOLD) return null;
         if (secondScore > 0 && (bestScore - secondScore) < PersonDescriptor.MARGIN) return null;
         return new RecognitionMatch(bestPerson, bestScore, bestFace, bestBody);
     }
@@ -326,6 +320,7 @@ public final class PeopleVault {
             Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
             c.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, iv));
             JSONArray arr = new JSONArray(new String(c.doFinal(ct), StandardCharsets.UTF_8));
+            boolean needsUpgradeSave = false;
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.getJSONObject(i);
                 Person p = new Person();
@@ -362,7 +357,40 @@ public final class PeopleVault {
                 }
                 p.body = floats(o.optJSONArray("body"));
                 p.voice = floats(o.optJSONArray("voice"));
+                int descVer = o.optInt("desc_v", 1);
+                if (descVer < 2 && p.name != null && !p.name.contains("(Demo)")) {
+                    List<float[]> rebuiltAngles = new ArrayList<>();
+                    for (String b64 : p.angleThumbs) {
+                        Bitmap bmp = CharacterBoard.decodeBase64(b64);
+                        if (bmp != null && bmp.getWidth() >= 16 && bmp.getHeight() >= 16) {
+                            int w = bmp.getWidth(), h = bmp.getHeight();
+                            int[] px = new int[w * h];
+                            bmp.getPixels(px, 0, w, 0, 0, w, h);
+                            float[] vec = PersonDescriptor.fromCrop(px, w, h);
+                            if (vec != null && vec.length > 0) rebuiltAngles.add(vec);
+                        }
+                    }
+                    if (rebuiltAngles.isEmpty()) {
+                        Bitmap bmp = CharacterBoard.decodeBase64(p.thumb);
+                        if (bmp != null && bmp.getWidth() >= 16 && bmp.getHeight() >= 16) {
+                            int w = bmp.getWidth(), h = bmp.getHeight();
+                            int[] px = new int[w * h];
+                            bmp.getPixels(px, 0, w, 0, 0, w, h);
+                            float[] vec = PersonDescriptor.fromCrop(px, w, h);
+                            if (vec != null && vec.length > 0) rebuiltAngles.add(vec);
+                        }
+                    }
+                    if (!rebuiltAngles.isEmpty()) {
+                        p.angleFaces = rebuiltAngles.toArray(new float[0][]);
+                        p.face = PersonDescriptor.fuseDescriptors(rebuiltAngles);
+                        p.body = new float[0];
+                        needsUpgradeSave = true;
+                    }
+                }
                 people.add(p);
+            }
+            if (needsUpgradeSave) {
+                save();
             }
         } catch (Exception e) {
             Log.w(TAG, "vault unreadable (" + e.getClass().getSimpleName() + "); starting empty");
@@ -384,6 +412,7 @@ public final class PeopleVault {
                     }
                 }
                 arr.put(new JSONObject()
+                        .put("desc_v", 2)
                         .put("id", p.id)
                         .put("name", p.name)
                         .put("role", p.role)

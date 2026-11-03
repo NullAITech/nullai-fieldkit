@@ -681,17 +681,19 @@ public final class CallActivity extends Activity {
         return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
     }
 
+    private String pendingMatchId = "";
+    private int pendingMatchStreak = 0;
+
     private void runVision(byte[] jpeg) {
         Bitmap bmp = decodeFrame(jpeg);
         if (bmp == null) return;
         pushRollingFrame(bmp);
 
         PeopleVault vault = PeopleVault.get(this);
-        boolean needBodiesAndObjects = detectOn || !vault.isEmpty();
-        // Param 2 = withHands (only needed when detectOn), Param 3 = withObjects (detects person bodies + objects)
-        Detector.Result r = detector().detect(bmp, detectOn, needBodiesAndObjects);
+        // Only run object/body detector when user explicitly toggled Detect HUD on
+        Detector.Result r = detector().detect(bmp, detectOn, detectOn);
 
-        // Cache largest face + matching body for instant Character Board generation
+        // Cache largest genuine detected face + matching body for Character Board generation
         RectF primaryFace = null;
         for (RectF f : r.faces) {
             if (primaryFace == null || f.width() * f.height() > primaryFace.width() * primaryFace.height()) {
@@ -704,38 +706,44 @@ public final class CallActivity extends Activity {
             lastBestBodyBox = matchedBody != null
                     ? new RectF(matchedBody)
                     : Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), primaryFace);
-        } else if (!r.bodies.isEmpty()) {
-            lastBestBodyBox = new RectF(r.bodies.get(0));
-            RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), lastBestBodyBox);
-            if (estFace != null) lastBestFaceBox = estFace;
+        } else {
+            lastBestFaceBox = null;
+            lastBestBodyBox = null;
         }
 
-        // Dual Face + Body recognition (checks detected faces first, then body-anchored crops if BlazeFace missed a side angle)
+        // Strict Face-Anchored Recognition: ONLY run recognition when BlazeFace detects a real face.
+        // Never guess a face from a body box or match on body/clothing alone.
         List<String> seen = new ArrayList<>();
-        PeopleVault.RecognitionMatch bestMatch = null;
+        PeopleVault.RecognitionMatch rawMatch = null;
         for (RectF f : r.faces) {
             float[] faceVec = descriptor(bmp, f);
+            if (faceVec == null) continue;
             RectF bBox = Detector.Result.findMatchingBody(f, r.bodies);
             if (bBox == null) bBox = Detector.estimateBodyFromFace(bmp.getWidth(), bmp.getHeight(), f);
             float[] bodyVec = bodyDescriptor(bmp, bBox);
 
             PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(faceVec, bodyVec);
             if (m != null && m.person != null) {
-                if (!seen.contains(m.person.name)) seen.add(m.person.name);
-                if (bestMatch == null || m.score > bestMatch.score) bestMatch = m;
+                if (rawMatch == null || m.score > rawMatch.score) rawMatch = m;
             }
         }
-        if (bestMatch == null && !r.bodies.isEmpty() && !vault.isEmpty()) {
-            for (RectF bBox : r.bodies) {
-                RectF estFace = Detector.estimateFaceFromBody(bmp.getWidth(), bmp.getHeight(), bBox);
-                float[] faceVec = estFace != null ? descriptor(bmp, estFace) : null;
-                float[] bodyVec = bodyDescriptor(bmp, bBox);
-                PeopleVault.RecognitionMatch m = vault.matchFaceAndBody(faceVec, bodyVec);
-                if (m != null && m.person != null) {
-                    if (!seen.contains(m.person.name)) seen.add(m.person.name);
-                    if (bestMatch == null || m.score > bestMatch.score) bestMatch = m;
-                }
+
+        // Require 2 consecutive vision frames matching the same person to eliminate single-frame false positives
+        PeopleVault.RecognitionMatch bestMatch = null;
+        if (rawMatch != null && rawMatch.person != null) {
+            if (rawMatch.person.id.equals(pendingMatchId)) {
+                pendingMatchStreak++;
+            } else {
+                pendingMatchId = rawMatch.person.id;
+                pendingMatchStreak = 1;
             }
+            if (pendingMatchStreak >= 2) {
+                bestMatch = rawMatch;
+                if (!seen.contains(bestMatch.person.name)) seen.add(bestMatch.person.name);
+            }
+        } else {
+            pendingMatchId = "";
+            pendingMatchStreak = 0;
         }
 
         long now = System.currentTimeMillis();
@@ -747,10 +755,11 @@ public final class CallActivity extends Activity {
         List<String> fresh = new ArrayList<>();
         for (String n : seen) {
             Long at = announced.get(n);
-            if (at == null || now - at > 12_000) { fresh.add(n); announced.put(n, now); }
+            if (at == null || now - at > 15_000) { fresh.add(n); announced.put(n, now); }
         }
         String summary = r.summary();
-        boolean sendSummary = detectOn && !summary.equals(lastSummary) && now - lastSummaryAt > 10_000;
+        boolean hasMeaningfulDetection = !r.faces.isEmpty() || !r.hands.isEmpty() || !r.objects.isEmpty();
+        boolean sendSummary = detectOn && hasMeaningfulDetection && !summary.equals(lastSummary) && now - lastSummaryAt > 12_000;
         if (sendSummary) { lastSummary = summary; lastSummaryAt = now; }
         Bitmap shown = detectOn ? drawBoxes(bmp, r) : null;
         if (shown != null) {
@@ -785,7 +794,7 @@ public final class CallActivity extends Activity {
         if (personCardOverlay == null) return;
         long now = System.currentTimeMillis();
         if (match == null || match.person == null) {
-            if (personCardOverlay.getVisibility() == View.VISIBLE && now - activePopupUpdatedAt > 6500) {
+            if (personCardOverlay.getVisibility() == View.VISIBLE && now - activePopupUpdatedAt > 2800) {
                 personCardOverlay.setVisibility(View.GONE);
                 activePopupPersonId = "";
             }
@@ -845,9 +854,10 @@ public final class CallActivity extends Activity {
 
     private static float[] descriptor(Bitmap bmp, RectF f) {
         Rect c = padded(bmp, f, 0.2f);
-        if (c.width() < 8 || c.height() < 8) return null;
+        if (c.width() < 16 || c.height() < 16) return null;
         int[] px = new int[c.width() * c.height()];
         bmp.getPixels(px, 0, c.width(), c.left, c.top, c.width(), c.height());
+        if (!PersonDescriptor.looksLikeValidFaceCrop(px, c.width(), c.height())) return null;
         return PersonDescriptor.fromCrop(px, c.width(), c.height());
     }
 

@@ -82,7 +82,7 @@ public final class Detector implements AutoCloseable {
         try {
             faces = FaceDetector.createFromOptions(app, FaceDetector.FaceDetectorOptions.builder()
                     .setBaseOptions(BaseOptions.builder().setModelAssetPath("models/blaze_face_short_range.tflite").build())
-                    .setRunningMode(RunningMode.IMAGE).setMinDetectionConfidence(0.35f).build());
+                    .setRunningMode(RunningMode.IMAGE).setMinDetectionConfidence(0.62f).build());
         } catch (Throwable t) { Log.w(TAG, "face detector unavailable: " + t); }
         try {
             hands = HandLandmarker.createFromOptions(app, HandLandmarker.HandLandmarkerOptions.builder()
@@ -92,7 +92,7 @@ public final class Detector implements AutoCloseable {
         try {
             objects = ObjectDetector.createFromOptions(app, ObjectDetector.ObjectDetectorOptions.builder()
                     .setBaseOptions(BaseOptions.builder().setModelAssetPath("models/efficientdet_lite0.tflite").build())
-                    .setRunningMode(RunningMode.IMAGE).setMaxResults(6).setScoreThreshold(0.38f).build());
+                    .setRunningMode(RunningMode.IMAGE).setMaxResults(6).setScoreThreshold(0.45f).build());
         } catch (Throwable t) { Log.w(TAG, "object detector unavailable: " + t); }
     }
 
@@ -100,9 +100,19 @@ public final class Detector implements AutoCloseable {
     public List<RectF> faces(Bitmap bmp) {
         List<RectF> out = new ArrayList<>();
         if (faces == null || bmp == null) return out;
+        int imgW = bmp.getWidth(), imgH = bmp.getHeight();
+        float minArea = imgW * imgH * 0.008f;
         try {
             FaceDetectorResult r = faces.detect(new BitmapImageBuilder(bmp).build());
-            for (Detection d : r.detections()) out.add(new RectF(d.boundingBox()));
+            for (Detection d : r.detections()) {
+                RectF box = new RectF(d.boundingBox());
+                box.intersect(0f, 0f, imgW, imgH);
+                float bw = box.width(), bh = box.height();
+                if (bw < 24f || bh < 24f || bw * bh < minArea) continue;
+                float aspect = bw / bh;
+                if (aspect < 0.52f || aspect > 1.58f) continue;
+                out.add(box);
+            }
         } catch (Throwable t) { Log.w(TAG, "face detect failed: " + t); }
         return out;
     }
@@ -133,8 +143,12 @@ public final class Detector implements AutoCloseable {
                     List<Category> c = d.categories();
                     if (c.isEmpty()) continue;
                     String name = c.get(0).categoryName();
+                    float score = c.get(0).score();
                     if ("person".equals(name)) {
-                        res.bodies.add(new RectF(d.boundingBox()));
+                        // Require high confidence (0.58+) for person bodies so chairs/coats don't false-trigger
+                        if (score >= 0.58f) {
+                            res.bodies.add(new RectF(d.boundingBox()));
+                        }
                         continue;
                     }
                     if (!res.objects.contains(name)) res.objects.add(name);
