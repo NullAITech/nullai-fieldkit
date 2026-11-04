@@ -14,7 +14,10 @@ import os
 import time
 from typing import Any, Awaitable, Callable
 
-from mcp.server.fastmcp import Context, FastMCP
+try:
+    from mcp.server.fastmcp import Context, FastMCP
+except (ImportError, ModuleNotFoundError):
+    from mcp.server.mcpserver import Context, MCPServer as FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from .config import Agent
@@ -223,11 +226,20 @@ def _local_backend(relay: Relay, fixed_agent: Agent | None):
 
 
 def build_mcp(relay: Relay, fixed_agent: Agent | None = None) -> FastMCP:
+    import inspect
     hosts = relay.cfg.mcp_allowed_hosts
     sec = TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts),
                                     allowed_hosts=hosts, allowed_origins=[f"https://{h}" for h in hosts])
-    mcp = FastMCP("zoth-relay", instructions=INSTRUCTIONS, stateless_http=True, json_response=True,
-                  streamable_http_path="/mcp", transport_security=sec, log_level="WARNING")
+    kwargs = {"instructions": INSTRUCTIONS, "log_level": "WARNING"}
+    sig_params = inspect.signature(FastMCP.__init__).parameters
+    if "stateless_http" in sig_params:
+        kwargs.update({
+            "stateless_http": True,
+            "json_response": True,
+            "streamable_http_path": "/mcp",
+            "transport_security": sec,
+        })
+    mcp = FastMCP("zoth-relay", **kwargs)
     _register(mcp, _local_backend(relay, fixed_agent))
     return mcp
 

@@ -97,7 +97,7 @@ public final class CallActivity extends Activity {
     private String activePopupPersonId = "";
     private long activePopupUpdatedAt = 0L;
 
-    private final VisionMemory visionMemory = new VisionMemory();
+    private final VisionMemory visionMemory = VisionMemory.get();
     private long lastVisionMemoryPushAt = 0L;
     private Button btnCallModeIntel, btnCallModeGodVoice, btnCallModeCoder, btnCallModeCustom;
 

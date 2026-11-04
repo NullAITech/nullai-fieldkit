@@ -87,7 +87,7 @@ def test_mode_endpoints_and_auth(tmp_path, monkeypatch):
     r = c.get("/v1/mode", headers=H)
     assert r.status_code == 200 and r.json()["mode"] is None and "adventure" in r.json()["modes"]
     r = c.post("/v1/mode/onboard", headers=H, json={"answers": []})
-    assert r.json()["done"] is False and len(r.json()["choices"]) == 4
+    assert r.json()["done"] is False and len(r.json()["choices"]) == len(MODES)
     r = c.post("/v1/mode/onboard", headers=H, json={"answers": ["tell me where to go", "walking", "views"]})
     j = r.json()
     assert j["done"] and j["state"]["mode"] == "adventure" and j["state"]["map_hud"] is True

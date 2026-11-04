@@ -161,7 +161,7 @@ public class MainActivity extends Activity {
     private ImageView ivGlasses;
     private Button btnConnect, btnSrcPhone, btnSrcGlasses, btnFab, btnFull, btnPreset, btnRecDemo, btnDemoGoals;
     private Button btnMainModeIntel, btnMainModeGodVoice, btnMainModeCoder, btnMainModeCustom;
-    private final VisionMemory mainVisionMemory = new VisionMemory();
+    private final VisionMemory mainVisionMemory = VisionMemory.get();
     private boolean glassesMode = false;
     private boolean fullscreen = false;
     private byte[] pendingGlassesFrame = null;
@@ -1383,6 +1383,7 @@ public class MainActivity extends Activity {
                     lastMainBodyBox = null;
                 }
 
+                PeopleVault.RecognitionMatch bestMatch = null;
                 if (!vault.isEmpty() && !r.faces.isEmpty()) {
                     PeopleVault.RecognitionMatch rawMatch = null;
                     for (RectF f : r.faces) {
@@ -1396,7 +1397,6 @@ public class MainActivity extends Activity {
                             rawMatch = m;
                         }
                     }
-                    PeopleVault.RecognitionMatch bestMatch = null;
                     if (rawMatch != null && rawMatch.person != null) {
                         if (rawMatch.person.id.equals(mainPendingMatchId)) {
                             mainPendingMatchStreak++;
@@ -1425,14 +1425,23 @@ public class MainActivity extends Activity {
                             sendWs(detMsg);
                         } catch (Exception ignored) { }
                     }
-                    mainVisionMemory.recordObservation(r, bestMatch, fromGlasses ? "Meta Glasses" : "Phone Cam");
-                    final PeopleVault.RecognitionMatch matchUi = bestMatch;
-                    runOnUiThread(() -> updateMainRecognitionPopup(matchUi));
                 } else {
                     mainPendingMatchId = "";
                     mainPendingMatchStreak = 0;
-                    runOnUiThread(() -> updateMainRecognitionPopup(null));
                 }
+
+                // Continuously stream observations into VisionMemory even when no faces are present
+                mainVisionMemory.recordObservation(r, bestMatch, fromGlasses ? "Meta Glasses" : "Phone Cam");
+                final PeopleVault.RecognitionMatch matchUi = bestMatch;
+                runOnUiThread(() -> {
+                    updateMainRecognitionPopup(matchUi);
+                    SpotterMode.ModeInfo curMode = SpotterMode.getActiveMode(MainActivity.this);
+                    String activeObj = SpotterMode.getActiveObjective(MainActivity.this);
+                    String trig = mainVisionMemory.checkObjectiveTrigger(curMode != null ? curMode.key : "intel", activeObj);
+                    if (trig != null) {
+                        showMainLiveCaption("💡 " + trig);
+                    }
+                });
             } catch (Throwable ignored) {
             } finally {
                 mainVisionBusy = false;

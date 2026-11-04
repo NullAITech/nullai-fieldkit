@@ -54,6 +54,19 @@ public final class VisionMemory {
     }
 
     private static final int MAX_EVENTS = 16;
+    private static volatile VisionMemory INSTANCE;
+
+    public static VisionMemory get() {
+        if (INSTANCE == null) {
+            synchronized (VisionMemory.class) {
+                if (INSTANCE == null) {
+                    INSTANCE = new VisionMemory();
+                }
+            }
+        }
+        return INSTANCE;
+    }
+
     private final ArrayDeque<VisionEvent> events = new ArrayDeque<>();
     private final Object lock = new Object();
 
