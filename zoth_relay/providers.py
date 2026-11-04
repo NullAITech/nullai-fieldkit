@@ -212,7 +212,7 @@ def provider_presets() -> dict[str, Provider]:
     return {
         # Fast reactor: reactive coaching turns, minimal reasoning (tunable via extra).
         "spark": OpenAICompatProvider("spark", META_BASE, spark, api_key_env="META_API_KEY",
-                                      extra={"reasoning_effort": "minimal"}),
+                                      max_tokens=1200, extra={"reasoning_effort": "minimal"}),
         # Deep planner: mission planning + periodic review (rare, high-value calls).
         "wonder": OpenAICompatProvider("wonder", META_BASE, wonder, api_key_env="META_API_KEY",
                                        max_tokens=1200),

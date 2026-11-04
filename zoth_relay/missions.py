@@ -235,7 +235,7 @@ async def plan_interview(provider: Provider, goal: str,
                   "If it is clear, reply with ONLY JSON: "
                   '{"steps": ["step 1", ...]} — 4 to 8 short imperative steps, '
                   "each under 12 words, in order. No other text.")
-    turn = Turn(system=PLANNER_SYSTEM, prompt=prompt)
+    turn = Turn(system=PLANNER_SYSTEM, prompt=prompt, max_tokens=1500)
     text = await _complete(provider, turn, transport)
     lo, hi = text.find("{"), text.rfind("}")
     if 0 <= lo < hi:
