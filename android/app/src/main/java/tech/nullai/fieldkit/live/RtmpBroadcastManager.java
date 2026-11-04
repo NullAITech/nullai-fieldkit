@@ -301,8 +301,8 @@ public final class RtmpBroadcastManager {
         String[][] presetsData = new String[][]{
                 {"x", "𝕏 X Live"},
                 {"twitch", "👾 Twitch"},
-                {"youtube", "▶️ YouTube"},
-                {"obs", "🎬 OBS Ingest"}
+                {"youtube", "▶ YouTube"},
+                {"obs", "🎬 OBS"}
         };
 
         Button[] presetButtons = new Button[4];
@@ -313,9 +313,13 @@ public final class RtmpBroadcastManager {
             final String pLabel = presetsData[i][1];
             Button b = new Button(activity);
             b.setText(pLabel);
-            b.setTextSize(11f);
+            b.setTextSize(10.5f);
             b.setTypeface(Typeface.DEFAULT_BOLD);
             b.setAllCaps(false);
+            b.setSingleLine(true);
+            b.setPadding(0, 0, 0, 0);
+            b.setMinWidth(0);
+            b.setMinimumWidth(0);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(activity, 38), 1f);
             if (i < 3) lp.rightMargin = dp(activity, 4);
             b.setLayoutParams(lp);
