@@ -26,7 +26,7 @@ import tech.nullai.fieldkit.voice.VoicePrint;
  */
 public final class VoiceGateActivity extends Activity {
 
-    private boolean voiceLockEnabled = true;
+    private boolean voiceLockEnabled = false;
     private TextView modeStatusTv;
     private TextView voiceprintStatusTv;
     private ProgressBar micLevelBar;
@@ -39,7 +39,7 @@ public final class VoiceGateActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", true);
+        voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", false);
 
         ScrollView sv = new ScrollView(this);
         sv.setBackgroundColor(0xFF090D14);

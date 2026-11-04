@@ -52,6 +52,7 @@ public final class CallActivity extends Activity {
     public static final String EXTRA_TOKEN = "token";
     public static final String EXTRA_ON_GLASSES = "on_glasses";
     public static final String EXTRA_EYES = "eyes";
+    public static final String EXTRA_MISSION = "mission";
 
     private static final int REQ_MIC = 4711;
     private static final int REQ_DAT_CAM = 4101;
@@ -68,7 +69,7 @@ public final class CallActivity extends Activity {
     private Button muteBtn, eyesBtn, avatarBtn, hangBtn, recBtn, captionsBtn, voiceLockBtn, chatsBtn, devBtn, rtmpBtn;
     private boolean pipExpanded = false;
     private boolean devTelemetryVisible = false;
-    private boolean voiceLockEnabled = true;
+    private boolean voiceLockEnabled = false;
     private long lastPreviewPaintAt = 0L;
     private long lastRollingFrameAt = 0L;
 
@@ -216,7 +217,7 @@ public final class CallActivity extends Activity {
             });
         }
 
-        voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", true);
+        voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", false);
         updateVoiceLockButtonUi();
         if (voiceLockBtn != null) {
             voiceLockBtn.setOnClickListener(v -> {
@@ -740,7 +741,12 @@ public final class CallActivity extends Activity {
         started = true;
         previousGlassesListener = DatGlasses.INSTANCE.getListener();
         DatGlasses.INSTANCE.setListener(callEyes);
-        call = new LiveCall(this, relay, token, buildSavedPeopleContext(), callListener);
+        String missionExtra = getIntent().getStringExtra(EXTRA_MISSION);
+        String initialCtx = buildSavedPeopleContext();
+        if (missionExtra != null && !missionExtra.trim().isEmpty()) {
+            initialCtx = "[CURRENT ACTIVE MISSION & GOAL CONTEXT]:\n" + missionExtra.trim() + "\n\n" + initialCtx;
+        }
+        call = new LiveCall(this, relay, token, initialCtx, callListener);
         call.configureVoiceLock(this, voiceLockEnabled);
         if (videoOn) call.setVideoEnabled(true);
         call.start();

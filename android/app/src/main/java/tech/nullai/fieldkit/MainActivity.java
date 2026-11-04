@@ -2605,6 +2605,14 @@ public class MainActivity extends Activity {
         Intent i = new Intent(this, CallActivity.class);
         i.putExtra(CallActivity.EXTRA_RELAY, etRelay.getText().toString().trim());
         i.putExtra(CallActivity.EXTRA_TOKEN, etToken.getText().toString().trim());
+        String goalText = etGoal != null ? etGoal.getText().toString().trim() : "";
+        String stepText = tvStep != null ? tvStep.getText().toString().trim() : "";
+        StringBuilder fullMissionCtx = new StringBuilder();
+        if (!goalText.isEmpty()) fullMissionCtx.append("Wearer's Goal: ").append(goalText).append("\n");
+        if (!stepText.isEmpty()) fullMissionCtx.append("Active Plan / Checklist:\n").append(stepText).append("\n");
+        String visionSummary = mainVisionMemory.toContextPrompt(null, goalText);
+        if (!visionSummary.isEmpty()) fullMissionCtx.append("Recent Vision Timeline:\n").append(visionSummary).append("\n");
+        i.putExtra(CallActivity.EXTRA_MISSION, fullMissionCtx.toString().trim());
         boolean useGlasses = glassesMode || DatGlasses.INSTANCE.isStreaming();
         if (useGlasses) {
             i.putExtra(CallActivity.EXTRA_ON_GLASSES, true);

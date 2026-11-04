@@ -89,7 +89,7 @@ public final class LiveCall {
 
     private Context appCtx;
     private SpeakerGate speakerGate = new SpeakerGate();
-    private volatile boolean voiceLockEnabled = true;
+    private volatile boolean voiceLockEnabled = false;
     private volatile boolean pendingManualEnroll = false;
     private final List<float[]> autoEnrollTakes = new ArrayList<>();
     private final short[] voicedRing = new short[IN_RATE * 64 / 100]; // 640 ms of 16 kHz speech
