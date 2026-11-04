@@ -87,7 +87,7 @@ class AskRequest(BaseModel):
 
 
 class LiveTokenRequest(BaseModel):
-    mission: str | None = Field(None, max_length=2000)
+    mission: str | None = Field(None, max_length=16000)
     voice: str | None = Field(None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
 
 
