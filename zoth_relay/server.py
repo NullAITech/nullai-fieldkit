@@ -242,6 +242,9 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         live = relay.check_live(agent, ip)
         body = body or LiveTokenRequest()
         mission = (body.mission or "").strip()
+        mode_text = agent_mode_prompt(agent.name)
+        if mode_text and mode_text not in mission:
+            mission = f"{mode_text}\n{mission}".strip() if mission else mode_text
         try:
             p_lines = people_for(agent, ip).prompt_lines(limit=12)
         except Exception:

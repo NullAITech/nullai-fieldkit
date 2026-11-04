@@ -54,6 +54,7 @@ import tech.nullai.fieldkit.people.CharacterBoard;
 import tech.nullai.fieldkit.people.PeopleVault;
 import tech.nullai.fieldkit.people.PersonDescriptor;
 import tech.nullai.fieldkit.vision.Detector;
+import tech.nullai.fieldkit.vision.VisionMemory;
 import tech.nullai.fieldkit.voice.LockedListener;
 import tech.nullai.fieldkit.voice.OwnerPrintStore;
 import tech.nullai.fieldkit.voice.OwnerPrintPrefs;
@@ -159,6 +160,8 @@ public class MainActivity extends Activity {
     private TextureView preview;
     private ImageView ivGlasses;
     private Button btnConnect, btnSrcPhone, btnSrcGlasses, btnFab, btnFull, btnPreset, btnRecDemo, btnDemoGoals;
+    private Button btnMainModeIntel, btnMainModeGodVoice, btnMainModeCoder, btnMainModeCustom;
+    private final VisionMemory mainVisionMemory = new VisionMemory();
     private boolean glassesMode = false;
     private boolean fullscreen = false;
     private byte[] pendingGlassesFrame = null;
@@ -350,6 +353,7 @@ public class MainActivity extends Activity {
         if (btnDemoGoals != null) {
             btnDemoGoals.setOnClickListener(v -> showDemoGoalsPicker());
         }
+        initMainModeSelector();
         btnPreset = findViewById(R.id.btnPreset);
         btnPreset.setOnClickListener(v -> {
             presetIdx = (presetIdx + 1) % PRESETS.length;
@@ -769,6 +773,86 @@ public class MainActivity extends Activity {
                 });
             }
         }
+    }
+
+    private void initMainModeSelector() {
+        btnMainModeIntel = findViewById(R.id.btnMainModeIntel);
+        btnMainModeGodVoice = findViewById(R.id.btnMainModeGodVoice);
+        btnMainModeCoder = findViewById(R.id.btnMainModeCoder);
+        btnMainModeCustom = findViewById(R.id.btnMainModeCustom);
+
+        if (btnMainModeIntel != null) btnMainModeIntel.setOnClickListener(v -> selectMainMode(SpotterMode.MODE_INTEL));
+        if (btnMainModeGodVoice != null) btnMainModeGodVoice.setOnClickListener(v -> selectMainMode(SpotterMode.MODE_GOD_VOICE));
+        if (btnMainModeCoder != null) btnMainModeCoder.setOnClickListener(v -> selectMainMode(SpotterMode.MODE_VIBE_CODER));
+        if (btnMainModeCustom != null) btnMainModeCustom.setOnClickListener(v -> promptMainCustomObjective());
+
+        updateMainModeUi();
+    }
+
+    private void updateMainModeUi() {
+        SpotterMode.ModeInfo mi = SpotterMode.getActiveMode(this);
+        setMainModeBtnState(btnMainModeIntel, SpotterMode.MODE_INTEL.equals(mi.key));
+        setMainModeBtnState(btnMainModeGodVoice, SpotterMode.MODE_GOD_VOICE.equals(mi.key));
+        setMainModeBtnState(btnMainModeCoder, SpotterMode.MODE_VIBE_CODER.equals(mi.key));
+        setMainModeBtnState(btnMainModeCustom, SpotterMode.MODE_DIRECTIVE.equals(mi.key));
+    }
+
+    private void setMainModeBtnState(Button btn, boolean active) {
+        if (btn == null) return;
+        btn.setBackgroundResource(active ? R.drawable.bg_accent_emerald : R.drawable.bg_dark_pill);
+        btn.setTextColor(active ? 0xFF34D399 : 0xFFCBD5E1);
+    }
+
+    private void selectMainMode(String modeKey) {
+        SpotterMode.setActiveMode(this, modeKey, null);
+        updateMainModeUi();
+        SpotterMode.ModeInfo mi = SpotterMode.getMode(modeKey);
+        String obj = SpotterMode.getActiveObjective(this);
+        Toast.makeText(this, "🎯 Mode: " + mi.title + " · " + mi.tag, Toast.LENGTH_SHORT).show();
+        status("Mode: " + mi.title + " (" + mi.tag + ")");
+        syncMainModeToRelayAsync(modeKey, obj);
+    }
+
+    private void promptMainCustomObjective() {
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setHint("e.g. Network with people to sell my services");
+        et.setText(SpotterMode.getActiveObjective(this));
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("🎯 Custom Spotter Directive")
+                .setMessage("What specific goal or mission should Spotter help with?")
+                .setView(et)
+                .setPositiveButton("Set Directive", (d, w) -> {
+                    String goal = et.getText().toString().trim();
+                    SpotterMode.setActiveMode(this, SpotterMode.MODE_DIRECTIVE, goal);
+                    updateMainModeUi();
+                    SpotterMode.ModeInfo mi = SpotterMode.getMode(SpotterMode.MODE_DIRECTIVE);
+                    Toast.makeText(this, "🎯 Directive Set: " + (goal.isEmpty() ? mi.title : goal), Toast.LENGTH_SHORT).show();
+                    status("Directive: " + (goal.isEmpty() ? mi.title : goal));
+                    syncMainModeToRelayAsync(SpotterMode.MODE_DIRECTIVE, goal);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void syncMainModeToRelayAsync(String modeKey, String goal) {
+        new Thread(() -> {
+            try {
+                String relay = relayBase();
+                String tok = token();
+                if (relay == null || tok == null || relay.isEmpty() || tok.isEmpty()) return;
+                org.json.JSONObject body = new org.json.JSONObject()
+                        .put("mode", modeKey)
+                        .put("goal", goal != null ? goal : "")
+                        .put("answers", new org.json.JSONArray())
+                        .put("map_hud", false);
+                okhttp3.Request r = new okhttp3.Request.Builder()
+                        .url(relay.replaceAll("/+$", "") + "/v1/mode")
+                        .header("Authorization", "Bearer " + tok)
+                        .post(okhttp3.RequestBody.create(body.toString(), okhttp3.MediaType.get("application/json")))
+                        .build();
+                http.newCall(r).execute().close();
+            } catch (Throwable ignored) { }
+        }, "relay-main-mode-sync").start();
     }
 
     private void showModePicker() {
@@ -1341,6 +1425,7 @@ public class MainActivity extends Activity {
                             sendWs(detMsg);
                         } catch (Exception ignored) { }
                     }
+                    mainVisionMemory.recordObservation(r, bestMatch, fromGlasses ? "Meta Glasses" : "Phone Cam");
                     final PeopleVault.RecognitionMatch matchUi = bestMatch;
                     runOnUiThread(() -> updateMainRecognitionPopup(matchUi));
                 } else {

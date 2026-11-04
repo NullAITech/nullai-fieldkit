@@ -17,14 +17,65 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 MODES: dict[str, dict] = {
+    "intel": {
+        "label": "Intel & People",
+        "blurb": "Character Boards, facial recognition, social dossiers, VIP tracking.",
+        "prompt": ("Goal mode INTEL & RECON: the wearer is networking, meeting people, or conducting "
+                   "social recon. Identify people in view using the Saved People roster and 4-Angle "
+                   "Character Boards. Suggest natural, confident openers tied to what is seen, note attire "
+                   "and expressions, and help remember names and follow-ups. Speak concisely into the wearer's ear."),
+        "questions": ["Where are you (conference, meetup, pitch, event)?",
+                      "What kind of people or partners are you looking to meet?"],
+        "map": False,
+    },
+    "god_voice": {
+        "label": "Subconscious (God's Voice)",
+        "blurb": "God's voice in your ear · quiet inner guidance and deep intuition.",
+        "prompt": ("Goal mode SUBCONSCIOUS (GOD'S VOICE IN YOUR EAR): You are the wearer's inner voice, "
+                   "subconscious guardian, and higher intuition speaking softly into their ear through smart glasses. "
+                   "Do NOT chatter continuously. Speak ONLY when a critical intuitive insight, hidden pattern, "
+                   "moral clarity, or safety hazard is detected, or when the wearer pauses and speaks to you. "
+                   "Keep all replies under 16 words, calm, serene, and deeply grounding."),
+        "questions": ["What is your inner focus or intention right now?",
+                      "How proactive should the inner voice be (whisper only on key insights vs reflective)?"],
+        "map": False,
+    },
+    "vibe_coder": {
+        "label": "Vibe Coder",
+        "blurb": "Screen pair programmer, code review, debugging, terminal wingman.",
+        "prompt": ("Goal mode VIBE CODER: You are an elite software engineering pair programmer looking directly "
+                   "at the wearer's monitors, laptop screens, IDEs, and terminals. "
+                   "Instantly spot syntax errors, tracebacks, git commands, and architecture improvements. "
+                   "When the wearer asks about code in view, provide the exact fix, command, or explanation punchily."),
+        "questions": ["What stack or language are you coding in right now?",
+                      "Are you building a new feature or debugging an issue?"],
+        "map": False,
+    },
+    "directive": {
+        "label": "Custom Goal",
+        "blurb": "Autonomous co-pilot executing the wearer's specific objective.",
+        "prompt": ("Goal mode DIRECTIVE: Help the wearer accomplish their custom stated mission. "
+                   "Actively watch the Vision Memory stream for landmarks, objects, or people matching the goal, "
+                   "and provide proactive guidance toward completing the mission."),
+        "questions": ["In one sentence, what specific mission or goal do you want Spotter to execute?"],
+        "map": False,
+    },
+    # Aliases for backward compatibility
     "network": {
-        "label": "Network & meet people",
-        "blurb": "Icebreakers, read the room, remember who you met.",
-        "prompt": ("Goal mode NETWORK: the wearer wants to meet people. Suggest natural "
-                   "openers tied to what is in view, notice who is approachable, keep "
-                   "tips short and discreet, and help them remember names and follow-ups."),
+        "label": "Intel & People",
+        "blurb": "Character Boards, facial recognition, social dossiers, VIP tracking.",
+        "prompt": ("Goal mode INTEL & RECON: the wearer is networking, meeting people, or conducting "
+                   "social recon. Identify people in view using the Saved People roster and 4-Angle "
+                   "Character Boards. Suggest natural, confident openers tied to what is seen."),
         "questions": ["Where are you (event, bar, campus, conference)?",
                       "What kind of people do you want to meet?"],
+        "map": False,
+    },
+    "custom": {
+        "label": "Custom Goal",
+        "blurb": "Tell Spotter your own goal.",
+        "prompt": "Goal mode DIRECTIVE: help the wearer with their stated goal.",
+        "questions": ["In one sentence, what do you want Spotter to help with?"],
         "map": False,
     },
     "repair": {
@@ -47,13 +98,6 @@ MODES: dict[str, dict] = {
         "questions": ["Walking, biking or driving?",
                       "What sounds fun: food, views, history, nightlife, nature?"],
         "map": True,
-    },
-    "custom": {
-        "label": "Custom",
-        "blurb": "Tell Spotter your own goal.",
-        "prompt": "Goal mode CUSTOM: help the wearer with their stated goal.",
-        "questions": ["In one sentence, what do you want Spotter to help with?"],
-        "map": False,
     },
 }
 

@@ -14,6 +14,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.util.Base64;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -43,6 +44,7 @@ import tech.nullai.fieldkit.vision.Detector;
  * "Advanced Biometrics & Vector Telemetry" section for developers.
  */
 public final class CharacterBoard {
+    private static final String TAG = "CharacterBoard";
 
     public static final String[] ANGLE_LABELS = new String[]{
             "1 · FRONT FACE",
@@ -628,80 +630,124 @@ public final class CharacterBoard {
         boardImg.setImageBitmap(extHolder[0].compositeBoard);
         root.addView(boardImg);
 
-        // Live Multi-Angle Capture & Local Relay AI Feature Bar
-        LinearLayout scanRow = new LinearLayout(activity);
-        scanRow.setOrientation(LinearLayout.HORIZONTAL);
-        scanRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams scanRowLp = new LinearLayout.LayoutParams(-1, -2);
-        scanRowLp.topMargin = dp(activity, 8);
-        scanRow.setLayoutParams(scanRowLp);
+        // 4-Angle Manual Studio Grid & Guided Stepper
+        final int[] activeSlot = new int[]{0}; // 0=Front, 1=Left 45°, 2=Right 45°, 3=Body
+        final String[] slotLabels = new String[]{"1 · FRONT", "2 · LEFT 45°", "3 · RIGHT 45°", "4 · BODY"};
+        final String[] slotGuides = new String[]{
+                "👉 Step 1 of 4: Have them look directly into camera (Front Face ID).",
+                "👉 Step 2 of 4: Have them turn their head 45° to their LEFT.",
+                "👉 Step 3 of 4: Have them turn their head 45° to their RIGHT.",
+                "👉 Step 4 of 4: Step back or tilt down to frame their TORSO & ATTIRE."
+        };
+
+        LinearLayout tilesContainer = new LinearLayout(activity);
+        tilesContainer.setOrientation(LinearLayout.VERTICAL);
+        tilesContainer.setBackgroundResource(R.drawable.bg_dark_card);
+        tilesContainer.setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 8));
+        LinearLayout.LayoutParams tcLp = new LinearLayout.LayoutParams(-1, -2);
+        tcLp.topMargin = dp(activity, 10);
+        tilesContainer.setLayoutParams(tcLp);
+
+        TextView studioHeaderTv = new TextView(activity);
+        studioHeaderTv.setText("🎯 4-ANGLE GUIDED CAPTURE STUDIO");
+        studioHeaderTv.setTextColor(0xFF7DD3FC);
+        studioHeaderTv.setTextSize(11.5f);
+        studioHeaderTv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        tilesContainer.addView(studioHeaderTv);
+
+        LinearLayout tilesRow = new LinearLayout(activity);
+        tilesRow.setOrientation(LinearLayout.HORIZONTAL);
+        tilesRow.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+        tilesRow.setPadding(0, dp(activity, 6), 0, dp(activity, 6));
+
+        final ImageView[] slotImgs = new ImageView[4];
+        final TextView[] slotBadges = new TextView[4];
+        final LinearLayout[] slotCards = new LinearLayout[4];
+
+        for (int i = 0; i < 4; i++) {
+            final int slotIdx = i;
+            LinearLayout card = new LinearLayout(activity);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setGravity(Gravity.CENTER_HORIZONTAL);
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, -2, 1f);
+            if (i > 0) cLp.leftMargin = dp(activity, 5);
+            card.setLayoutParams(cLp);
+            card.setPadding(dp(activity, 4), dp(activity, 6), dp(activity, 4), dp(activity, 6));
+            card.setBackgroundResource(R.drawable.bg_dark_subcard);
+
+            TextView lbl = new TextView(activity);
+            lbl.setText(slotLabels[i]);
+            lbl.setTextColor(0xFFCBD5E1);
+            lbl.setTextSize(9.5f);
+            lbl.setTypeface(Typeface.DEFAULT_BOLD);
+            lbl.setGravity(Gravity.CENTER);
+            card.addView(lbl);
+
+            ImageView iv = new ImageView(activity);
+            iv.setLayoutParams(new LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 52)));
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            if (extHolder[0].angleBitmaps[i] != null && !extHolder[0].angleBitmaps[i].isRecycled()) {
+                iv.setImageBitmap(extHolder[0].angleBitmaps[i]);
+            }
+            card.addView(iv);
+            slotImgs[i] = iv;
+
+            TextView badge = new TextView(activity);
+            boolean hasAngle = extHolder[0].angleBitmaps[i] != null && !extHolder[0].angleBitmaps[i].isRecycled();
+            badge.setText(hasAngle ? "✓ Locked" : "Snap");
+            badge.setTextColor(hasAngle ? 0xFF34D399 : 0xFF7DD3FC);
+            badge.setTextSize(9.5f);
+            badge.setTypeface(Typeface.DEFAULT_BOLD);
+            badge.setPadding(0, dp(activity, 2), 0, 0);
+            card.addView(badge);
+            slotBadges[i] = badge;
+
+            card.setOnClickListener(v -> {
+                activeSlot[0] = slotIdx;
+                for (int k = 0; k < 4; k++) {
+                    slotCards[k].setBackgroundColor(k == activeSlot[0] ? 0xFF1E293B : 0xFF0F172A);
+                }
+            });
+            slotCards[i] = card;
+            tilesRow.addView(card);
+        }
+        tilesContainer.addView(tilesRow);
+
+        final TextView guideTv = new TextView(activity);
+        guideTv.setText(slotGuides[0]);
+        guideTv.setTextColor(0xFFFDE68A);
+        guideTv.setTextSize(11.5f);
+        guideTv.setTypeface(Typeface.DEFAULT_BOLD);
+        guideTv.setPadding(0, dp(activity, 4), 0, dp(activity, 6));
+        tilesContainer.addView(guideTv);
+
+        LinearLayout actionRow = new LinearLayout(activity);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+        actionRow.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
 
         final TextView aiStatusTv = new TextView(activity);
-        aiStatusTv.setText("✨ Relay AI Vision: analyzing attire & facial features…");
+        aiStatusTv.setText("✨ Relay AI: analyzing…");
         aiStatusTv.setTextColor(0xFF34D399);
-        aiStatusTv.setTextSize(11.5f);
+        aiStatusTv.setTextSize(11f);
         aiStatusTv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         aiStatusTv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
-        scanRow.addView(aiStatusTv);
+        actionRow.addView(aiStatusTv);
 
-        if (frameSupplier != null) {
-            Button btnRescan = new Button(activity);
-            btnRescan.setText("📸 Capture Angle");
-            btnRescan.setAllCaps(false);
-            btnRescan.setTextColor(0xFF7DD3FC);
-            btnRescan.setTextSize(11.5f);
-            btnRescan.setTypeface(Typeface.DEFAULT_BOLD);
-            btnRescan.setMinHeight(dp(activity, 36));
-            btnRescan.setMinimumHeight(dp(activity, 36));
-            btnRescan.setPadding(dp(activity, 12), dp(activity, 4), dp(activity, 12), dp(activity, 4));
-            btnRescan.setBackgroundResource(R.drawable.bg_dark_pill);
-            scanRow.addView(btnRescan);
+        final Button btnSnap = new Button(activity);
+        btnSnap.setText("📸 Snap " + slotLabels[0]);
+        btnSnap.setAllCaps(false);
+        btnSnap.setTextColor(0xFFFFFFFF);
+        btnSnap.setTextSize(11.5f);
+        btnSnap.setTypeface(Typeface.DEFAULT_BOLD);
+        btnSnap.setMinHeight(dp(activity, 38));
+        btnSnap.setMinimumHeight(dp(activity, 38));
+        btnSnap.setPadding(dp(activity, 12), dp(activity, 4), dp(activity, 12), dp(activity, 4));
+        btnSnap.setBackgroundResource(R.drawable.bg_accent_emerald);
+        actionRow.addView(btnSnap);
 
-            btnRescan.setOnClickListener(v -> {
-                btnRescan.setEnabled(false);
-                btnRescan.setText("Scanning…");
-                new Thread(() -> {
-                    Bitmap fresh = frameSupplier.captureFreshFrame();
-                    Detector d = frameSupplier.getDetector();
-                    if (fresh != null && !fresh.isRecycled()) {
-                        synchronized (workingFrames) {
-                            if (workingFrames.size() >= 6) workingFrames.remove(0);
-                            workingFrames.add(fresh);
-                        }
-                        BoardExtraction updated = extractWithDetector(d, workingFrames, fresh, null, null);
-                        if (updated != null) {
-                            // Merge previous angle face descriptors with new ones (up to 8 angles)
-                            List<float[]> mergedAngles = new ArrayList<>();
-                            if (extHolder[0].angleFaceDescriptors != null) {
-                                for (float[] av : extHolder[0].angleFaceDescriptors) {
-                                    if (av != null && av.length > 0) mergedAngles.add(av);
-                                }
-                            }
-                            if (updated.angleFaceDescriptors != null) {
-                                for (float[] av : updated.angleFaceDescriptors) {
-                                    if (av != null && av.length > 0 && mergedAngles.size() < 8) {
-                                        mergedAngles.add(av);
-                                    }
-                                }
-                            }
-                            updated.angleFaceDescriptors = mergedAngles.toArray(new float[0][]);
-                            updated.faceDescriptor = PersonDescriptor.fuseDescriptors(mergedAngles);
-                            updated.detectedAnglesCount = mergedAngles.size();
-                            extHolder[0] = updated;
-                        }
-                    }
-                    activity.runOnUiThread(() -> {
-                        btnRescan.setEnabled(true);
-                        btnRescan.setText("📸 +Angle (" + extHolder[0].detectedAnglesCount + ")");
-                        boardImg.setImageBitmap(extHolder[0].compositeBoard);
-                        sub.setText(String.format(Locale.US,
-                                "Locked %d multi-angle descriptors + clothing & posture profile for high-precision recognition.",
-                                extHolder[0].detectedAnglesCount));
-                    });
-                }, "board-rescan").start();
-            });
-        }
-        root.addView(scanRow);
+        tilesContainer.addView(actionRow);
+        root.addView(tilesContainer);
 
         // Digestible Summary Card
         final LinearLayout summaryCard = new LinearLayout(activity);
@@ -725,6 +771,107 @@ public final class CharacterBoard {
         };
         rebuildSummaryRows.run();
         root.addView(summaryCard);
+
+        Runnable refreshStudioViews = () -> {
+            for (int k = 0; k < 4; k++) {
+                slotCards[k].setBackgroundColor(k == activeSlot[0] ? 0xFF1E293B : 0xFF0F172A);
+                if (extHolder[0].angleBitmaps[k] != null && !extHolder[0].angleBitmaps[k].isRecycled()) {
+                    slotImgs[k].setImageBitmap(extHolder[0].angleBitmaps[k]);
+                    slotBadges[k].setText("✓ Locked");
+                    slotBadges[k].setTextColor(0xFF34D399);
+                } else {
+                    slotBadges[k].setText("Snap");
+                    slotBadges[k].setTextColor(0xFF7DD3FC);
+                }
+            }
+            guideTv.setText(slotGuides[activeSlot[0]]);
+            btnSnap.setText("📸 Snap " + slotLabels[activeSlot[0]]);
+            boardImg.setImageBitmap(extHolder[0].compositeBoard);
+            sub.setText(String.format(Locale.US,
+                    "Locked %d multi-angle descriptors + clothing & posture profile for instant recognition.",
+                    extHolder[0].detectedAnglesCount));
+        };
+        refreshStudioViews.run();
+
+        btnSnap.setOnClickListener(v -> {
+            btnSnap.setEnabled(false);
+            btnSnap.setText("Snapping…");
+            new Thread(() -> {
+                try {
+                    Bitmap fresh = frameSupplier != null ? frameSupplier.captureFreshFrame() : primaryFrame;
+                    Detector d = frameSupplier != null ? frameSupplier.getDetector() : det;
+                    if (fresh == null || fresh.isRecycled()) fresh = primaryFrame;
+                    if (fresh != null && !fresh.isRecycled()) {
+                        int slot = activeSlot[0];
+                        Detector.Result r = d != null ? d.detect(fresh, false, true) : null;
+                        RectF fBox = null;
+                        if (r != null && !r.faces.isEmpty()) {
+                            for (RectF f : r.faces) {
+                                if (fBox == null || f.width() * f.height() > fBox.width() * fBox.height()) {
+                                    fBox = new RectF(f);
+                                }
+                            }
+                        }
+                        RectF bBox = null;
+                        if (r != null && !r.bodies.isEmpty()) {
+                            bBox = fBox != null ? Detector.Result.findMatchingBody(fBox, r.bodies) : new RectF(r.bodies.get(0));
+                        }
+                        int fw = fresh.getWidth(), fh = fresh.getHeight();
+                        if (fBox == null && bBox != null) fBox = Detector.estimateFaceFromBody(fw, fh, bBox);
+                        if (bBox == null && fBox != null) bBox = Detector.estimateBodyFromFace(fw, fh, fBox);
+
+                        if ((slot == 0 || slot == 1 || slot == 2) && fBox != null) {
+                            float mLeft = (slot == 1) ? 0.36f : ((slot == 2) ? 0.12f : 0.18f);
+                            float mRight = (slot == 1) ? 0.12f : ((slot == 2) ? 0.36f : 0.18f);
+                            Bitmap angleBmp = cropBitmapWithMargin(fresh, fBox, mLeft, mRight, 0.18f, 0.24f, 240, 240);
+                            float[] vec = cropDescriptorFace(fresh, fBox, 0.08f);
+                            extHolder[0].angleBitmaps[slot] = angleBmp;
+                            extHolder[0].angleBase64[slot] = encodeJpeg(angleBmp, 200, 80);
+                            if (slot == 0) extHolder[0].primaryThumbBase64 = extHolder[0].angleBase64[0];
+
+                            List<float[]> allFaces = new ArrayList<>();
+                            if (extHolder[0].angleFaceDescriptors != null) {
+                                for (float[] av : extHolder[0].angleFaceDescriptors) {
+                                    if (av != null && av.length > 0) allFaces.add(av);
+                                }
+                            }
+                            if (vec != null && vec.length > 0) allFaces.add(vec);
+                            extHolder[0].angleFaceDescriptors = allFaces.toArray(new float[0][]);
+                            extHolder[0].faceDescriptor = PersonDescriptor.fuseDescriptors(allFaces);
+                            extHolder[0].detectedAnglesCount = allFaces.size();
+                        } else if (slot == 3 && bBox != null) {
+                            Bitmap bodyBmp = cropBitmapWithMargin(fresh, bBox, 0.12f, 0.12f, 0.08f, 0.12f, 240, 240);
+                            extHolder[0].angleBitmaps[3] = bodyBmp;
+                            extHolder[0].angleBase64[3] = encodeJpeg(bodyBmp, 200, 80);
+                            BodyCropResult bc = extractPixelsWithSize(fresh, bBox, 0.04f);
+                            if (bc != null) {
+                                extHolder[0].bodyDescriptor = PersonDescriptor.fromBodyCrop(bc.pixels, bc.w, bc.h);
+                                float aspect = bBox.height() > 1f ? (bBox.width() / bBox.height()) : 0.6f;
+                                extHolder[0].appearance = PersonDescriptor.analyzeAppearance(bc.pixels, bc.w, bc.h, aspect);
+                            }
+                        }
+
+                        extHolder[0].compositeBoard = renderCompositeBoard(
+                                extHolder[0].angleBitmaps,
+                                extHolder[0].appearance,
+                                extHolder[0].faceDescriptor != null && extHolder[0].faceDescriptor.length > 0,
+                                extHolder[0].bodyDescriptor != null && extHolder[0].bodyDescriptor.length > 0
+                        );
+                        extHolder[0].compositeBase64 = encodeJpeg(extHolder[0].compositeBoard, 560, 82);
+
+                        // Advance to next angle slot automatically
+                        activeSlot[0] = (activeSlot[0] + 1) % 4;
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "snapSingleAngle: " + t);
+                }
+                activity.runOnUiThread(() -> {
+                    btnSnap.setEnabled(true);
+                    refreshStudioViews.run();
+                    rebuildSummaryRows.run();
+                });
+            }, "board-snap").start();
+        });
 
         // Trigger async Local Relay /v1/people/analyze enrichment
         analyzeWithRelayAsync(activity, extHolder[0].compositeBase64,

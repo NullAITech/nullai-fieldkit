@@ -22,6 +22,75 @@
         android:ellipsize="end"
         android:text="Opening a live Muse session…" />
 
+    <!-- Spotter Persona Mode Switcher Bar (Intel | Subconscious | Vibe Coder | Custom Goal) -->
+    <LinearLayout
+        android:id="@+id/callModeBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnCallModeIntel"
+            android:contentDescription="Intel &amp; People Mode"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_accent_emerald"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textColor="#34D399"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="👥 Intel" />
+
+        <Button
+            android:id="@+id/btnCallModeGodVoice"
+            android:contentDescription="Subconscious God's Voice Mode"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1.25"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textColor="#CBD5E1"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="👁️ Subconscious" />
+
+        <Button
+            android:id="@+id/btnCallModeCoder"
+            android:contentDescription="Vibe Coder Screen Wingman Mode"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1.15"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textColor="#CBD5E1"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="⚡ Vibe Coder" />
+
+        <Button
+            android:id="@+id/btnCallModeCustom"
+            android:contentDescription="Custom Goal Directive Mode"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:textAllCaps="false"
+            android:textColor="#CBD5E1"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:text="🎯 Goal" />
+    </LinearLayout>
+
     <!-- Second Row: Spacious Quick Utility Bar (CC Captions | Chats | REC | Dev) -->
     <LinearLayout
         android:layout_width="match_parent"

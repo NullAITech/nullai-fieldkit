@@ -37,6 +37,7 @@ import tech.nullai.fieldkit.people.CharacterBoard;
 import tech.nullai.fieldkit.people.PeopleVault;
 import tech.nullai.fieldkit.people.PersonDescriptor;
 import tech.nullai.fieldkit.vision.Detector;
+import tech.nullai.fieldkit.vision.VisionMemory;
 
 /**
  * The Muse call: a real conversational session with live AI closed captions,
@@ -91,6 +92,10 @@ public final class CallActivity extends Activity {
     private long dismissedPersonUntil = 0L;
     private String activePopupPersonId = "";
     private long activePopupUpdatedAt = 0L;
+
+    private final VisionMemory visionMemory = new VisionMemory();
+    private long lastVisionMemoryPushAt = 0L;
+    private Button btnCallModeIntel, btnCallModeGodVoice, btnCallModeCoder, btnCallModeCustom;
 
     /** Rolling 4-frame buffer for multi-angle Character Board extraction. */
     private final ArrayDeque<Bitmap> rollingFrames = new ArrayDeque<>(4);
@@ -272,6 +277,8 @@ public final class CallActivity extends Activity {
             if (call != null) call.hangUp();
         });
 
+        initCallModeSelector();
+
         if (use3d || videoOn) setEyes(true);
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -299,6 +306,100 @@ public final class CallActivity extends Activity {
             voiceLockBtn.setTextColor(0xFF94A3B8);
             voiceLockBtn.setBackgroundResource(R.drawable.bg_dark_pill);
         }
+    }
+
+    private void initCallModeSelector() {
+        btnCallModeIntel = findViewById(R.id.btnCallModeIntel);
+        btnCallModeGodVoice = findViewById(R.id.btnCallModeGodVoice);
+        btnCallModeCoder = findViewById(R.id.btnCallModeCoder);
+        btnCallModeCustom = findViewById(R.id.btnCallModeCustom);
+
+        if (btnCallModeIntel != null) btnCallModeIntel.setOnClickListener(v -> selectCallMode(SpotterMode.MODE_INTEL));
+        if (btnCallModeGodVoice != null) btnCallModeGodVoice.setOnClickListener(v -> selectCallMode(SpotterMode.MODE_GOD_VOICE));
+        if (btnCallModeCoder != null) btnCallModeCoder.setOnClickListener(v -> selectCallMode(SpotterMode.MODE_VIBE_CODER));
+        if (btnCallModeCustom != null) btnCallModeCustom.setOnClickListener(v -> promptCallCustomObjective());
+
+        updateCallModeUi();
+    }
+
+    private void updateCallModeUi() {
+        SpotterMode.ModeInfo mi = SpotterMode.getActiveMode(this);
+        setCallModeBtnState(btnCallModeIntel, SpotterMode.MODE_INTEL.equals(mi.key));
+        setCallModeBtnState(btnCallModeGodVoice, SpotterMode.MODE_GOD_VOICE.equals(mi.key));
+        setCallModeBtnState(btnCallModeCoder, SpotterMode.MODE_VIBE_CODER.equals(mi.key));
+        setCallModeBtnState(btnCallModeCustom, SpotterMode.MODE_DIRECTIVE.equals(mi.key));
+    }
+
+    private void setCallModeBtnState(Button btn, boolean active) {
+        if (btn == null) return;
+        btn.setBackgroundResource(active ? R.drawable.bg_accent_emerald : R.drawable.bg_dark_pill);
+        btn.setTextColor(active ? 0xFF34D399 : 0xFFCBD5E1);
+    }
+
+    private void selectCallMode(String modeKey) {
+        SpotterMode.setActiveMode(this, modeKey, null);
+        updateCallModeUi();
+        SpotterMode.ModeInfo mi = SpotterMode.getMode(modeKey);
+        String obj = SpotterMode.getActiveObjective(this);
+        showLiveCaptionBanner("🎯 MODE: " + mi.title.toUpperCase(Locale.US) + " — " + mi.tag);
+        addCaption("· switched mode to " + mi.title);
+        if (call != null) {
+            call.sendContext("[SPOTTER PERSONA ACTIVATED]: The wearer selected " + mi.title
+                    + " (" + mi.tag + "). Active Objective: \"" + obj + "\".\nDirective: "
+                    + mi.promptDirective);
+        }
+        syncModeToRelayAsync(modeKey, obj);
+    }
+
+    private void promptCallCustomObjective() {
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setHint("e.g. Network with people to sell my services");
+        et.setText(SpotterMode.getActiveObjective(this));
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("🎯 Custom Spotter Directive")
+                .setMessage("What specific goal or task should Spotter co-pilot?")
+                .setView(et)
+                .setPositiveButton("Set Directive", (d, w) -> {
+                    String goal = et.getText().toString().trim();
+                    SpotterMode.setActiveMode(this, SpotterMode.MODE_DIRECTIVE, goal);
+                    updateCallModeUi();
+                    SpotterMode.ModeInfo mi = SpotterMode.getMode(SpotterMode.MODE_DIRECTIVE);
+                    showLiveCaptionBanner("🎯 DIRECTIVE: " + (goal.isEmpty() ? mi.title : goal));
+                    addCaption("· custom directive: " + goal);
+                    if (call != null) {
+                        call.sendContext("[SPOTTER PERSONA ACTIVATED]: Custom Objective: \"" + goal
+                                + "\". Proactively watch the Vision Memory stream and help wearer achieve this goal.");
+                    }
+                    syncModeToRelayAsync(SpotterMode.MODE_DIRECTIVE, goal);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void syncModeToRelayAsync(String modeKey, String goal) {
+        new Thread(() -> {
+            try {
+                String relay = getIntent().getStringExtra(EXTRA_RELAY);
+                String token = getIntent().getStringExtra(EXTRA_TOKEN);
+                if (relay == null || token == null || relay.isEmpty() || token.isEmpty()) {
+                    android.content.SharedPreferences sp = getSharedPreferences("fieldkit", MODE_PRIVATE);
+                    relay = sp.getString("relay", null);
+                    token = sp.getString("token", null);
+                }
+                if (relay == null || token == null || relay.isEmpty() || token.isEmpty()) return;
+                org.json.JSONObject body = new org.json.JSONObject()
+                        .put("mode", modeKey)
+                        .put("goal", goal != null ? goal : "")
+                        .put("answers", new org.json.JSONArray())
+                        .put("map_hud", false);
+                okhttp3.Request r = new okhttp3.Request.Builder()
+                        .url(relay.replaceAll("/+$", "") + "/v1/mode")
+                        .header("Authorization", "Bearer " + token)
+                        .post(okhttp3.RequestBody.create(body.toString(), okhttp3.MediaType.get("application/json")))
+                        .build();
+                new okhttp3.OkHttpClient().newCall(r).execute().close();
+            } catch (Throwable ignored) { }
+        }, "relay-mode-sync").start();
     }
 
     private void showVoiceLockDialog() {
@@ -766,6 +867,8 @@ public final class CallActivity extends Activity {
             DemoRecorder.get().onBitmapFrame(shown, eyesGlasses);
         }
 
+        visionMemory.recordObservation(r, bestMatch, eyesGlasses ? "Meta Glasses" : "Phone Cam");
+
         final PeopleVault.RecognitionMatch matchedForUi = bestMatch;
         main.post(() -> {
             if (detectOn) {
@@ -775,6 +878,22 @@ public final class CallActivity extends Activity {
             }
             updateRecognitionPopup(matchedForUi);
             if (call == null) return;
+
+            // Push structured Vision Memory timeline into the Live context window
+            SpotterMode.ModeInfo curMode = SpotterMode.getActiveMode(CallActivity.this);
+            String curObj = SpotterMode.getActiveObjective(CallActivity.this);
+            if (now - lastVisionMemoryPushAt > 5500L || matchedForUi != null) {
+                lastVisionMemoryPushAt = now;
+                call.sendContext(visionMemory.toContextPrompt(curMode.key, curObj));
+            }
+
+            // Check proactive objective trigger
+            String triggerPrompt = visionMemory.checkObjectiveTrigger(curMode.key, curObj);
+            if (triggerPrompt != null) {
+                addCaption("· objective trigger: " + triggerPrompt);
+                call.sendContext(triggerPrompt);
+            }
+
             if (!fresh.isEmpty() && matchedForUi != null && matchedForUi.person != null) {
                 PeopleVault.Person mp = matchedForUi.person;
                 addCaption("· recognized: " + mp.name + " (" + mp.role + ")");
