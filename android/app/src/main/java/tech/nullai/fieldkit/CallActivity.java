@@ -38,6 +38,7 @@ import tech.nullai.fieldkit.people.PeopleVault;
 import tech.nullai.fieldkit.people.PersonDescriptor;
 import tech.nullai.fieldkit.vision.Detector;
 import tech.nullai.fieldkit.vision.VisionMemory;
+import tech.nullai.fieldkit.voice.WakePhrase;
 
 /**
  * The Muse call: a real conversational session with live AI closed captions,
@@ -467,6 +468,10 @@ public final class CallActivity extends Activity {
 
         // Persist to ConversationStore when sentence grows or changes meaningfully
         if (fromWearer) {
+            WakePhrase.Result wp = WakePhrase.parse(clean);
+            if (wp != null && wp.isCommand()) {
+                executeCallSpokenCommand(wp.command);
+            }
             if (!clean.equals(lastPersistedUserText) && (clean.length() > 12 || clean.endsWith(".") || clean.endsWith("?"))) {
                 lastPersistedUserText = clean;
                 ConversationStore.get(this).appendMessage(activeConvId, "You", clean);
@@ -476,6 +481,62 @@ public final class CallActivity extends Activity {
                 lastPersistedMuseText = clean;
                 ConversationStore.get(this).appendMessage(activeConvId, "Muse", clean);
             }
+        }
+    }
+
+    private void executeCallSpokenCommand(WakePhrase.Command cmd) {
+        if (cmd == null) return;
+        switch (cmd) {
+            case PROTOCOL_ZERO:
+                showLiveCaptionBanner("🛡️ ZOTH PROTOCOL ZERO: Emergency Lockdown Active");
+                addCaption("· [TRIGGER] ZOTH PROTOCOL ZERO executed");
+                if (personCardOverlay != null) personCardOverlay.setVisibility(View.GONE);
+                if (call != null) call.sendContext("[EMERGENCY LOCKDOWN]: The wearer triggered Protocol Zero. Mute active chatter and enter silent security mode.");
+                break;
+            case GHOST_VEIL:
+                showLiveCaptionBanner("👁️ OBSIDIAN GHOST VEIL: Silent Stealth Mode Active");
+                addCaption("· [TRIGGER] OBSIDIAN GHOST VEIL active");
+                if (call != null) call.setMuted(true);
+                break;
+            case SOUL_AWAKEN:
+                showLiveCaptionBanner("⚡ ZOTH SOUL AWAKEN: 3D Presence Engaged");
+                addCaption("· [TRIGGER] SOUL AWAKEN active");
+                use3d = true;
+                applyAvatarMode();
+                if (call != null) call.sendText("I hear you, sovereign. What shall we conquer?");
+                break;
+            case HORIZON_SEVER:
+                showLiveCaptionBanner("🛑 APERTURE HORIZON SEVER: Severing Link");
+                addCaption("· [TRIGGER] HORIZON SEVER executed");
+                if (call != null) call.hangUp();
+                finish();
+                break;
+            case CHARACTER_LOCK:
+                showLiveCaptionBanner("📸 CHRONO CHARACTER LOCK: Snapping Person");
+                addCaption("· [TRIGGER] CHARACTER LOCK active");
+                rememberPerson();
+                break;
+            case TIMELINE_ECHO:
+                showLiveCaptionBanner("📜 VISION TIMELINE ECHO: Querying Memory");
+                addCaption("· [TRIGGER] TIMELINE ECHO active");
+                if (call != null) {
+                    call.sendText("Summarize what was recently logged in your Vision Memory timeline in one short sentence.");
+                }
+                break;
+            case ORACLE_WHISPER:
+                selectCallMode(SpotterMode.MODE_GOD_VOICE);
+                break;
+            case SYNTAX_MATRIX:
+                selectCallMode(SpotterMode.MODE_VIBE_CODER);
+                break;
+            case SOCIAL_RECON:
+                selectCallMode(SpotterMode.MODE_INTEL);
+                break;
+            case SOVEREIGN_VECTOR:
+                promptCallCustomObjective();
+                break;
+            default:
+                break;
         }
     }
 

@@ -30,7 +30,18 @@ public final class WakePhrase {
         SIGHT_CHECK,
         NOTE,
         PERSON_MARK, PERSON_ENROLL, PERSON_WHO,
-        SOUL_SYNC
+        SOUL_SYNC,
+        // The 10 Unique Preset Trigger Phrases
+        PROTOCOL_ZERO,          // "Zoth Protocol Zero" -> Emergency Vault Lockdown & Camouflage
+        GHOST_VEIL,             // "Obsidian Ghost Veil" -> Silent Incognito HUD & Stealth Recording
+        SOUL_AWAKEN,            // "Zoth Soul Awaken" -> Summon 3D Live Call
+        HORIZON_SEVER,          // "Aperture Horizon Sever" -> Emergency Call Hangup & Audio Sever
+        CHARACTER_LOCK,         // "Chrono Character Lock" -> Instant Hands-Free 4-Angle Snap
+        TIMELINE_ECHO,          // "Vision Timeline Echo" -> Query Vision Memory Timeline
+        ORACLE_WHISPER,         // "Silent Oracle Whisper" -> Mode: Subconscious / God's Voice
+        SYNTAX_MATRIX,          // "Syntax Matrix Inspect" -> Mode: Vibe Coder
+        SOCIAL_RECON,           // "Tactical Social Recon" -> Mode: Intel & People
+        SOVEREIGN_VECTOR        // "Starlight Sovereign Vector" -> Custom Directive Mode
     }
 
     /** Words that turn a match back into ordinary talk ("the spotter's guide said to activate it"). */
@@ -54,8 +65,12 @@ public final class WakePhrase {
             "hey", "ok", "okay", "yo", "zoth", "alright", "and", "so", "now", "um", "uh", "please"
     ));
 
-    private static final String[] ANCHORS_PRIMARY = {"spotter"};
-    private static final String[] ANCHORS_RARE = {"zoth"};
+    private static final String[] ANCHORS_PRIMARY = {
+            "spotter", "zoth", "obsidian", "chrono", "aperture", "vision", "silent", "syntax", "tactical", "starlight"
+    };
+    private static final String[] ANCHORS_RARE = {
+            "zoth", "obsidian", "chrono", "aperture", "starlight"
+    };
 
     private static final int MAX_SPAN = 7;          // tokens from anchor to end of match
     private static final double MIN_CONFIDENCE = 0.80;
@@ -84,6 +99,18 @@ public final class WakePhrase {
         SPECS.add(new Spec(Command.PERSON_ENROLL, new String[]{"enroll", "person"}));
         SPECS.add(new Spec(Command.PERSON_WHO, new String[]{"who", "is", "this"}, "this"));
         SPECS.add(new Spec(Command.SOUL_SYNC, new String[]{"soul", "sync"}, "sync"));
+
+        // 10 Unique Preset Trigger Phrases:
+        SPECS.add(new Spec(Command.PROTOCOL_ZERO, new String[]{"protocol", "zero"}, "zero", "0"));
+        SPECS.add(new Spec(Command.GHOST_VEIL, new String[]{"ghost", "veil"}, "veil"));
+        SPECS.add(new Spec(Command.SOUL_AWAKEN, new String[]{"soul", "awaken"}, "awaken", "awake"));
+        SPECS.add(new Spec(Command.HORIZON_SEVER, new String[]{"horizon", "sever"}, "sever", "cut"));
+        SPECS.add(new Spec(Command.CHARACTER_LOCK, new String[]{"character", "lock"}, "lock", "snap"));
+        SPECS.add(new Spec(Command.TIMELINE_ECHO, new String[]{"timeline", "echo"}, "echo", "log"));
+        SPECS.add(new Spec(Command.ORACLE_WHISPER, new String[]{"oracle", "whisper"}, "whisper"));
+        SPECS.add(new Spec(Command.SYNTAX_MATRIX, new String[]{"syntax", "matrix"}, "inspect", "debug"));
+        SPECS.add(new Spec(Command.SOCIAL_RECON, new String[]{"social", "recon"}, "recon", "people"));
+        SPECS.add(new Spec(Command.SOVEREIGN_VECTOR, new String[]{"sovereign", "vector"}, "vector", "goal"));
     }
 
     public static final class Result {

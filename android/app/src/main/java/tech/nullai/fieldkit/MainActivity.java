@@ -1507,6 +1507,50 @@ public class MainActivity extends Activity {
         mainPersonCardOverlay.setVisibility(View.VISIBLE);
     }
 
+    private void executeMainSpokenCommand(WakePhrase.Command cmd) {
+        if (cmd == null) return;
+        switch (cmd) {
+            case PROTOCOL_ZERO:
+                showMainLiveCaption("🛡️ ZOTH PROTOCOL ZERO: Emergency Lockdown Active");
+                status("PROTOCOL ZERO: Vault locked, HUD cleared.");
+                if (mainPersonCardOverlay != null) mainPersonCardOverlay.setVisibility(View.GONE);
+                break;
+            case GHOST_VEIL:
+                showMainLiveCaption("👁️ OBSIDIAN GHOST VEIL: Silent Stealth Mode");
+                status("GHOST VEIL: Incognito observation active.");
+                break;
+            case SOUL_AWAKEN:
+                showMainLiveCaption("⚡ ZOTH SOUL AWAKEN: Launching Live Call");
+                startCall();
+                break;
+            case HORIZON_SEVER:
+                showMainLiveCaption("🛑 APERTURE HORIZON SEVER: Disconnecting");
+                status("HORIZON SEVER: Session severed.");
+                break;
+            case CHARACTER_LOCK:
+                showMainLiveCaption("📸 CHRONO CHARACTER LOCK: Snapping Person");
+                personTap();
+                break;
+            case TIMELINE_ECHO:
+                showMainLiveCaption("📜 VISION TIMELINE ECHO: " + mainVisionMemory.toContextPrompt(null, null));
+                break;
+            case ORACLE_WHISPER:
+                selectMainMode(SpotterMode.MODE_GOD_VOICE);
+                break;
+            case SYNTAX_MATRIX:
+                selectMainMode(SpotterMode.MODE_VIBE_CODER);
+                break;
+            case SOCIAL_RECON:
+                selectMainMode(SpotterMode.MODE_INTEL);
+                break;
+            case SOVEREIGN_VECTOR:
+                promptMainCustomObjective();
+                break;
+            default:
+                break;
+        }
+    }
+
     /**
      * Opens the 4-Angle Face + Body Character Board builder dialog so the wearer can save
      * the person in frame with 4 angles, attire/posture telemetry, role, and notes.
@@ -1855,6 +1899,7 @@ public class MainActivity extends Activity {
                 WakePhrase.Result wp = WakePhrase.parse(text);
                 if (wp != null && wp.isCommand()) {
                     msg.put("command", wp.command.name().toLowerCase(Locale.US));
+                    executeMainSpokenCommand(wp.command);
                 }
                 // A descriptor belongs to the frame in front of the camera NOW. For audio from
                 // minutes ago that is the wrong person, so the kept utterance is sent bare.
