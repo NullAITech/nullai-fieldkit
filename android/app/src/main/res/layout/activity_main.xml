@@ -99,16 +99,16 @@
                 android:contentDescription="Toggle live AI captions"
                 android:layout_width="0dp"
                 android:layout_height="42dp"
-                android:layout_weight="1"
+                android:layout_weight="0.85"
                 android:minHeight="42dp"
-                android:layout_marginEnd="8dp"
-                android:paddingHorizontal="8dp"
+                android:layout_marginEnd="6dp"
+                android:paddingHorizontal="6dp"
                 android:background="@drawable/bg_accent_emerald"
                 android:singleLine="true"
                 android:text="CC: ON"
                 android:textAllCaps="false"
                 android:textColor="#34D399"
-                android:textSize="12.5sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <Button
@@ -116,16 +116,16 @@
                 android:contentDescription="View or start conversations"
                 android:layout_width="0dp"
                 android:layout_height="42dp"
-                android:layout_weight="1.15"
+                android:layout_weight="0.95"
                 android:minHeight="42dp"
-                android:layout_marginEnd="8dp"
-                android:paddingHorizontal="8dp"
+                android:layout_marginEnd="6dp"
+                android:paddingHorizontal="6dp"
                 android:background="@drawable/bg_dark_pill"
                 android:singleLine="true"
                 android:text="💬 Chats"
                 android:textAllCaps="false"
                 android:textColor="#7DD3FC"
-                android:textSize="12.5sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <Button
@@ -133,15 +133,32 @@
                 android:contentDescription="Record live demo video"
                 android:layout_width="0dp"
                 android:layout_height="42dp"
-                android:layout_weight="1.15"
+                android:layout_weight="1.1"
                 android:minHeight="42dp"
-                android:paddingHorizontal="8dp"
+                android:layout_marginEnd="6dp"
+                android:paddingHorizontal="6dp"
                 android:background="@drawable/bg_dark_pill"
                 android:singleLine="true"
                 android:text="● REC Demo"
                 android:textAllCaps="false"
                 android:textColor="#FCA5A5"
-                android:textSize="12.5sp"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnMainRtmp"
+                android:contentDescription="Configure RTMP live streaming"
+                android:layout_width="0dp"
+                android:layout_height="42dp"
+                android:layout_weight="1.0"
+                android:minHeight="42dp"
+                android:paddingHorizontal="6dp"
+                android:background="@drawable/bg_dark_pill"
+                android:singleLine="true"
+                android:text="📡 RTMP"
+                android:textAllCaps="false"
+                android:textColor="#FDE68A"
+                android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
 

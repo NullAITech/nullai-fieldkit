@@ -12,6 +12,7 @@ Java source so the two halves cannot drift apart.
 """
 import base64
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -176,7 +177,9 @@ def test_command_ids_match_the_phone_enum():
     """The wire carries Command.name().toLowerCase() - so every enum constant must be known here."""
     src = WAKE_JAVA.read_text()
     body = src.split("public enum Command {", 1)[1].split("}", 1)[0]
-    names = [n.strip() for n in body.replace("\n", " ").split(",") if n.strip()]
+    lines = [re.sub(r"//.*$", "", line) for line in body.splitlines()]
+    body_clean = " ".join(lines)
+    names = [n.strip() for n in body_clean.split(",") if n.strip()]
     ids = {n.lower() for n in names if n != "NONE"}
     assert ids == set(COMMAND_HINTS), sorted(ids ^ set(COMMAND_HINTS))
 

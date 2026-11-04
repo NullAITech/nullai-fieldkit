@@ -41,7 +41,9 @@ public final class WakePhrase {
         ORACLE_WHISPER,         // "Silent Oracle Whisper" -> Mode: Subconscious / God's Voice
         SYNTAX_MATRIX,          // "Syntax Matrix Inspect" -> Mode: Vibe Coder
         SOCIAL_RECON,           // "Tactical Social Recon" -> Mode: Intel & People
-        SOVEREIGN_VECTOR        // "Starlight Sovereign Vector" -> Custom Directive Mode
+        SOVEREIGN_VECTOR,       // "Starlight Sovereign Vector" -> Custom Directive Mode
+        BROADCAST_START,        // "Zoth Broadcast Start" -> Start Live RTMP Streaming
+        BROADCAST_STOP          // "Aperture Broadcast Stop" -> Stop Live RTMP Streaming
     }
 
     /** Words that turn a match back into ordinary talk ("the spotter's guide said to activate it"). */
@@ -113,6 +115,8 @@ public final class WakePhrase {
         SPECS.add(new Spec(Command.SYNTAX_MATRIX, new String[]{"matrix", "inspect"}, "matrix", "inspect", "debug"));
         SPECS.add(new Spec(Command.SOCIAL_RECON, new String[]{"social", "recon"}, "recon", "people"));
         SPECS.add(new Spec(Command.SOVEREIGN_VECTOR, new String[]{"sovereign", "vector"}, "vector", "goal"));
+        SPECS.add(new Spec(Command.BROADCAST_START, new String[]{"broadcast", "start"}, "start", "live", "awaken"));
+        SPECS.add(new Spec(Command.BROADCAST_STOP, new String[]{"broadcast", "stop"}, "stop", "sever", "end"));
     }
 
     public static final class Result {

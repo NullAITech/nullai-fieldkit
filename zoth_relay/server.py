@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import contextlib
+import base64
 import json
 import os
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 import time
@@ -431,6 +432,11 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
                 t = m.get("type")
                 if t == "frame" and isinstance(m.get("image"), str):
                     frames += 1; conn.on_frame(m["image"])
+                    try:
+                        from .rtmp_streamer import STREAMER
+                        STREAMER.push_frame(base64.b64decode(m["image"]))
+                    except Exception:
+                        pass
                 elif t == "speech" and isinstance(m.get("text"), str):
                     speech += 1; await conn.on_speech(m["text"][:2000])
                 elif t == "barge":
@@ -846,6 +852,75 @@ def create_app(cfg: Config | None = None, relay: Relay | None = None):
         res = LIVE.stop()
         relay.audit.write("live_stop", agent=agent.name, ip=ip, via="rest", result="stopped")
         return res
+
+    # ------------------------------------------------------------------ RTMP & Live Broadcast Bridge
+    from .rtmp_streamer import STREAMER, PRESETS as RTMP_PRESETS
+
+    @app.get("/v1/rtmp", operation_id="rtmpStatus")
+    async def rtmp_status():
+        return STREAMER.status()
+
+    @app.post("/v1/rtmp/start", operation_id="rtmpStart")
+    async def rtmp_start(request: Request, body: dict, agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        preset = str(body.get("preset") or "")
+        stream_key = str(body.get("stream_key") or "")
+        dest = str(body.get("destination") or "")
+        fps = int(body.get("fps") or 20)
+        bitrate = str(body.get("bitrate") or "2500k")
+        try:
+            res = STREAMER.start(destination=dest, preset=preset, stream_key=stream_key, fps=fps, bitrate=bitrate)
+            relay.audit.write("rtmp_start", agent=agent.name, ip=ip, via="rest", result="started")
+            return res
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/v1/rtmp/stop", operation_id="rtmpStop")
+    async def rtmp_stop(request: Request, agent: Agent = Depends(auth)):
+        ip = client_ip(request)
+        relay.check_missions(agent, ip)
+        res = STREAMER.stop()
+        relay.audit.write("rtmp_stop", agent=agent.name, ip=ip, via="rest", result="stopped")
+        return res
+
+    @app.post("/v1/camera/frame", operation_id="cameraPushFrame")
+    async def camera_push_frame(request: Request, agent: Agent = Depends(auth)):
+        body = await request.body()
+        if body.startswith(b"{"):
+            try:
+                data = json.loads(body)
+                b64 = data.get("image") or data.get("frame")
+                if b64:
+                    raw = base64.b64decode(b64)
+                    STREAMER.push_frame(raw)
+                    return {"ok": True, "size": len(raw)}
+            except Exception as e:
+                raise HTTPException(400, f"Invalid JSON frame: {e}")
+        elif body:
+            STREAMER.push_frame(body)
+            return {"ok": True, "size": len(body)}
+        raise HTTPException(400, "Empty frame payload")
+
+    @app.get("/v1/camera/frame.jpg", include_in_schema=False)
+    async def camera_frame():
+        frame = STREAMER.get_latest_frame()
+        if not frame:
+            raise HTTPException(404, "No camera frame available yet")
+        return Response(content=frame, media_type="image/jpeg")
+
+    @app.get("/v1/camera/live.mjpg", include_in_schema=False)
+    async def camera_mjpg():
+        """MJPEG live video stream for OBS Studio (Browser/Media Source), VLC, or browser."""
+        import asyncio
+        async def frame_generator():
+            while True:
+                frame = STREAMER.get_latest_frame()
+                if frame:
+                    yield (b"--frame\r\n"
+                           b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+                await asyncio.sleep(0.066)
+        return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.websocket("/v1/sessions")
     async def sessions(ws: WebSocket):

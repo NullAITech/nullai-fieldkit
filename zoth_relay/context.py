@@ -49,6 +49,18 @@ COMMAND_HINTS = {
     "person_who": "The wearer is asking who someone is. Answer from your known-people list or say "
                   "you don't know - never guess from a face.",
     "soul_sync": "The wearer asked you to sync the current thread to their journal.",
+    "protocol_zero": "The wearer activated protocol zero: emergency camouflage and silent lockdown.",
+    "ghost_veil": "The wearer activated ghost veil: incognito heads-up display mode.",
+    "soul_awaken": "The wearer requested a live session awaken call.",
+    "horizon_sever": "The wearer requested an immediate emergency session disconnect.",
+    "character_lock": "The wearer requested an instant four-angle character lock capture.",
+    "timeline_echo": "The wearer asked to query their visual memory timeline.",
+    "oracle_whisper": "The wearer switched to subconscious oracle voice mode.",
+    "syntax_matrix": "The wearer switched to vibe coder inspection mode.",
+    "social_recon": "The wearer switched to tactical social reconnaissance mode.",
+    "sovereign_vector": "The wearer switched to custom sovereign vector directive mode.",
+    "broadcast_start": "The wearer started live RTMP streaming to broadcast destinations.",
+    "broadcast_stop": "The wearer stopped the live RTMP broadcast stream.",
 }
 
 _TOKEN = re.compile(r"[a-z0-9']+")

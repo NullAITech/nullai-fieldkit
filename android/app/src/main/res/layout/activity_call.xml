@@ -155,7 +155,7 @@
             android:contentDescription="Record live demo video"
             android:layout_width="0dp"
             android:layout_height="40dp"
-            android:layout_weight="0.95"
+            android:layout_weight="0.85"
             android:minHeight="40dp"
             android:layout_marginEnd="5dp"
             android:paddingHorizontal="4dp"
@@ -168,11 +168,28 @@
             android:textStyle="bold" />
 
         <Button
+            android:id="@+id/btnCallRtmp"
+            android:contentDescription="RTMP Live Broadcast Studio for X, Twitch, YouTube and OBS"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="0.95"
+            android:minHeight="40dp"
+            android:layout_marginEnd="5dp"
+            android:paddingHorizontal="4dp"
+            android:background="@drawable/bg_dark_pill"
+            android:singleLine="true"
+            android:text="📡 RTMP"
+            android:textAllCaps="false"
+            android:textColor="#F59E0B"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
+
+        <Button
             android:id="@+id/btnCallDev"
             android:contentDescription="Toggle developer telemetry"
             android:layout_width="0dp"
             android:layout_height="40dp"
-            android:layout_weight="0.8"
+            android:layout_weight="0.75"
             android:minHeight="40dp"
             android:paddingHorizontal="4dp"
             android:background="@drawable/bg_dark_pill"

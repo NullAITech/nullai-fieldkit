@@ -33,6 +33,7 @@ import java.util.concurrent.Executors;
 import tech.nullai.fieldkit.avatar.Muse2DView;
 import tech.nullai.fieldkit.avatar.Muse3DView;
 import tech.nullai.fieldkit.live.LiveCall;
+import tech.nullai.fieldkit.live.RtmpBroadcastManager;
 import tech.nullai.fieldkit.people.CharacterBoard;
 import tech.nullai.fieldkit.people.PeopleVault;
 import tech.nullai.fieldkit.people.PersonDescriptor;
@@ -63,7 +64,7 @@ public final class CallActivity extends Activity {
     private TextView meter;
     private TextView liveCaptionsTv;
     private LinearLayout personCardOverlay;
-    private Button muteBtn, eyesBtn, avatarBtn, hangBtn, recBtn, captionsBtn, voiceLockBtn, chatsBtn, devBtn;
+    private Button muteBtn, eyesBtn, avatarBtn, hangBtn, recBtn, captionsBtn, voiceLockBtn, chatsBtn, devBtn, rtmpBtn;
     private boolean pipExpanded = false;
     private boolean devTelemetryVisible = false;
     private boolean voiceLockEnabled = true;
@@ -203,8 +204,16 @@ public final class CallActivity extends Activity {
         voiceLockBtn = findViewById(R.id.btnCallVoiceLock);
         chatsBtn = findViewById(R.id.btnCallChats);
         devBtn = findViewById(R.id.btnCallDev);
+        rtmpBtn = findViewById(R.id.btnCallRtmp);
         preview = findViewById(R.id.ivEyesPreview);
         visionTv = findViewById(R.id.tvVision);
+
+        updateCallRtmpButtonUi();
+        if (rtmpBtn != null) {
+            rtmpBtn.setOnClickListener(v -> {
+                RtmpBroadcastManager.get(this).showBroadcastDialog(this, getCallRelay(), getCallToken(), this::updateCallRtmpButtonUi);
+            });
+        }
 
         voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", true);
         updateVoiceLockButtonUi();
@@ -295,6 +304,30 @@ public final class CallActivity extends Activity {
         captionsBtn.setText(captionsEnabled ? "CC: ON" : "CC: OFF");
         captionsBtn.setTextColor(captionsEnabled ? 0xFF34D399 : 0xFF94A3B8);
         captionsBtn.setBackgroundResource(captionsEnabled ? R.drawable.bg_accent_emerald : R.drawable.bg_dark_pill);
+    }
+
+    private void updateCallRtmpButtonUi() {
+        if (rtmpBtn == null) return;
+        boolean live = RtmpBroadcastManager.get(this).isLive();
+        rtmpBtn.setText(RtmpBroadcastManager.get(this).getButtonBadgeText());
+        rtmpBtn.setTextColor(live ? 0xFFFFFFFF : 0xFFF59E0B);
+        rtmpBtn.setBackgroundResource(live ? R.drawable.bg_accent_rose : R.drawable.bg_dark_pill);
+    }
+
+    private String getCallRelay() {
+        String relay = getIntent().getStringExtra(EXTRA_RELAY);
+        if (relay == null || relay.isEmpty()) {
+            relay = getSharedPreferences("fieldkit", MODE_PRIVATE).getString("relay", "");
+        }
+        return relay != null ? relay : "";
+    }
+
+    private String getCallToken() {
+        String token = getIntent().getStringExtra(EXTRA_TOKEN);
+        if (token == null || token.isEmpty()) {
+            token = getSharedPreferences("fieldkit", MODE_PRIVATE).getString("token", "");
+        }
+        return token != null ? token : "";
     }
 
     private void updateVoiceLockButtonUi() {
@@ -544,6 +577,32 @@ public final class CallActivity extends Activity {
             case SOVEREIGN_VECTOR:
                 promptCallCustomObjective();
                 break;
+            case BROADCAST_START:
+                showLiveCaptionBanner("🔴 ZOTH BROADCAST START: Launching RTMP Live Stream");
+                addCaption("· [TRIGGER] BROADCAST START active");
+                {
+                    RtmpBroadcastManager.get(this).startActiveBroadcast(getCallRelay(), getCallToken(), (active, platform, detail) -> {
+                        runOnUiThread(() -> {
+                            showLiveCaptionBanner(active ? "🔴 RTMP BROADCAST LIVE (" + platform + ")" : "⚠️ RTMP: " + detail);
+                            addCaption("· [RTMP] " + detail);
+                            updateCallRtmpButtonUi();
+                        });
+                    });
+                }
+                break;
+            case BROADCAST_STOP:
+                showLiveCaptionBanner("⏹️ APERTURE BROADCAST STOP: Terminating Live Stream");
+                addCaption("· [TRIGGER] BROADCAST STOP active");
+                {
+                    RtmpBroadcastManager.get(this).stopBroadcast(getCallRelay(), getCallToken(), (active, platform, detail) -> {
+                        runOnUiThread(() -> {
+                            showLiveCaptionBanner("⏹️ RTMP BROADCAST STOPPED");
+                            addCaption("· [RTMP] Broadcast stopped.");
+                            updateCallRtmpButtonUi();
+                        });
+                    });
+                }
+                break;
             default:
                 break;
         }
@@ -566,6 +625,7 @@ public final class CallActivity extends Activity {
         DatGlasses.INSTANCE.forceDevMode(this);
         captionsEnabled = ConversationStore.get(this).isCaptionsEnabled();
         updateCaptionsButtonUi();
+        updateCallRtmpButtonUi();
         DemoRecorder.get().setUiListener((recording, label) -> {
             if (recBtn != null) {
                 recBtn.setText(recording ? label : "● REC");
@@ -812,6 +872,9 @@ public final class CallActivity extends Activity {
         if (!videoOn) return;
         lastJpeg = jpeg;
         if (call != null) call.sendVideoFrame(jpeg);
+        if (RtmpBroadcastManager.get(this).isLive()) {
+            RtmpBroadcastManager.get(this).pushFrameAsync(getCallRelay(), getCallToken(), jpeg);
+        }
         if (!detectOn) {
             DemoRecorder.get().onJpegFrame(jpeg, eyesGlasses);
         }

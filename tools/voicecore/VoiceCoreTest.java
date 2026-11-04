@@ -51,6 +51,8 @@ public class VoiceCoreTest {
         expect(WakePhrase.Command.SYNTAX_MATRIX, "syntax matrix debug");
         expect(WakePhrase.Command.SOCIAL_RECON, "tactical social recon");
         expect(WakePhrase.Command.SOVEREIGN_VECTOR, "starlight sovereign vector");
+        expect(WakePhrase.Command.BROADCAST_START, "zoth broadcast start");
+        expect(WakePhrase.Command.BROADCAST_STOP, "aperture broadcast stop");
 
         System.out.println("\n== WakePhrase: rare anchor + contractions ==");
         WakePhrase.Result rare = WakePhrase.parse("zoth guide mode please activate");

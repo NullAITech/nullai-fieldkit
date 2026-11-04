@@ -92,6 +92,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+import tech.nullai.fieldkit.live.RtmpBroadcastManager;
 
 /**
  * FieldKit phone client (hackathon): talks to FieldKit Relay.
@@ -105,7 +106,7 @@ public class MainActivity extends Activity {
     private static final int REQ_DAT_CAM = 4101;   // Meta AI glasses camera permission
     private static final int REQ_CHATS = 4202;     // Conversations history & new session view
 
-    private Button btnMainCaptions, btnMainChats;
+    private Button btnMainCaptions, btnMainChats, btnMainRtmp;
     private TextView tvMainLiveCaptions;
     private LinearLayout mainPersonCardOverlay;
     private boolean captionsEnabled = true;
@@ -319,6 +320,15 @@ public class MainActivity extends Activity {
         if (btnMainChats != null) {
             btnMainChats.setOnClickListener(v ->
                     startActivityForResult(new Intent(this, ConversationsActivity.class), REQ_CHATS));
+        }
+        btnMainRtmp = findViewById(R.id.btnMainRtmp);
+        updateMainRtmpButtonUi();
+        if (btnMainRtmp != null) {
+            btnMainRtmp.setOnClickListener(v -> {
+                String relayUrl = etRelay != null ? etRelay.getText().toString().trim() : "";
+                String token = etToken != null ? etToken.getText().toString().trim() : "";
+                RtmpBroadcastManager.get(this).showBroadcastDialog(this, relayUrl, token, this::updateMainRtmpButtonUi);
+            });
         }
         View btnMainPeople = findViewById(R.id.btnMainPeople);
         if (btnMainPeople != null) {
@@ -596,6 +606,14 @@ public class MainActivity extends Activity {
         btnMainCaptions.setText(captionsEnabled ? "CC: ON" : "CC: OFF");
         btnMainCaptions.setTextColor(captionsEnabled ? 0xFF34D399 : 0xFF94A3B8);
         btnMainCaptions.setBackgroundResource(captionsEnabled ? R.drawable.bg_accent_emerald : R.drawable.bg_dark_pill);
+    }
+
+    private void updateMainRtmpButtonUi() {
+        if (btnMainRtmp == null) return;
+        boolean live = RtmpBroadcastManager.get(this).isLive();
+        btnMainRtmp.setText(RtmpBroadcastManager.get(this).getButtonBadgeText());
+        btnMainRtmp.setTextColor(live ? 0xFFFFFFFF : 0xFF1E293B);
+        btnMainRtmp.setBackgroundResource(live ? R.drawable.bg_accent_rose : R.drawable.bg_btn_light);
     }
 
     private void showMainLiveCaption(String line) {
@@ -1348,6 +1366,11 @@ public class MainActivity extends Activity {
 
     private void onMainCameraJpeg(byte[] jpeg, boolean fromGlasses) {
         if (jpeg == null || jpeg.length == 0) return;
+        if (RtmpBroadcastManager.get(this).isLive()) {
+            String relayUrl = etRelay != null ? etRelay.getText().toString().trim() : "";
+            String token = etToken != null ? etToken.getText().toString().trim() : "";
+            RtmpBroadcastManager.get(this).pushFrameAsync(relayUrl, token, jpeg);
+        }
         long now = System.currentTimeMillis();
         if (mainVisionBusy || now - lastMainVisionAt < 650) return;
         lastMainVisionAt = now;
@@ -1554,6 +1577,36 @@ public class MainActivity extends Activity {
                 break;
             case SOVEREIGN_VECTOR:
                 promptMainCustomObjective();
+                break;
+            case BROADCAST_START:
+                showMainLiveCaption("🔴 ZOTH BROADCAST START: Launching RTMP Live Stream");
+                status("BROADCAST: Starting stream...");
+                {
+                    String rUrl = etRelay != null ? etRelay.getText().toString().trim() : "";
+                    String tok = etToken != null ? etToken.getText().toString().trim() : "";
+                    RtmpBroadcastManager.get(this).startActiveBroadcast(rUrl, tok, (active, platform, detail) -> {
+                        runOnUiThread(() -> {
+                            showMainLiveCaption(active ? "🔴 RTMP BROADCAST LIVE (" + platform + ")" : "⚠️ RTMP: " + detail);
+                            status(detail);
+                            updateMainRtmpButtonUi();
+                        });
+                    });
+                }
+                break;
+            case BROADCAST_STOP:
+                showMainLiveCaption("⏹️ APERTURE BROADCAST STOP: Terminating Live Stream");
+                status("BROADCAST: Stopping stream...");
+                {
+                    String rUrl = etRelay != null ? etRelay.getText().toString().trim() : "";
+                    String tok = etToken != null ? etToken.getText().toString().trim() : "";
+                    RtmpBroadcastManager.get(this).stopBroadcast(rUrl, tok, (active, platform, detail) -> {
+                        runOnUiThread(() -> {
+                            showMainLiveCaption("⏹️ RTMP BROADCAST STOPPED");
+                            status("Broadcast stopped.");
+                            updateMainRtmpButtonUi();
+                        });
+                    });
+                }
                 break;
             default:
                 break;
@@ -2508,6 +2561,7 @@ public class MainActivity extends Activity {
         super.onResume();
         captionsEnabled = ConversationStore.get(this).isCaptionsEnabled();
         updateMainCaptionsButtonUi();
+        updateMainRtmpButtonUi();
         DemoRecorder.get().setUiListener((recording, label) -> {
             if (btnRecDemo != null) {
                 btnRecDemo.setText(label);

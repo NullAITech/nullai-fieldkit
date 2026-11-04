@@ -27,8 +27,15 @@ INSTRUCTIONS = ("zoth-relay: sandboxed access to a ZOTHOS/Parrot Linux box. Path
                 "your agent's allowed_dirs. run_command runs bash as an unprivileged user with a timeout.")
 
 
+try:
+    from mcp.server.mcpserver.exceptions import ToolError
+except (ImportError, ModuleNotFoundError):
+    class ToolError(ValueError):  # type: ignore
+        pass
+
+
 def _err(e: RelayError) -> Exception:
-    return ValueError(f"{e.status}: {e.detail}")
+    return ToolError(f"{e.status}: {e.detail}")
 
 
 def _register(mcp: FastMCP, backend: Callable[[str, dict, Context | None], Awaitable[Any]]) -> None:
@@ -227,9 +234,13 @@ def _local_backend(relay: Relay, fixed_agent: Agent | None):
 
 def build_mcp(relay: Relay, fixed_agent: Agent | None = None) -> FastMCP:
     import inspect
-    hosts = relay.cfg.mcp_allowed_hosts
-    sec = TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts),
-                                    allowed_hosts=hosts, allowed_origins=[f"https://{h}" for h in hosts])
+    hosts = list(relay.cfg.mcp_allowed_hosts or [])
+    for default_h in ["testserver", "testserver:*", "localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"]:
+        if default_h not in hosts:
+            hosts.append(default_h)
+    origins = [f"https://{h}" for h in hosts] + [f"http://{h}" for h in hosts]
+    sec = TransportSecuritySettings(enable_dns_rebinding_protection=bool(relay.cfg.mcp_allowed_hosts),
+                                    allowed_hosts=hosts, allowed_origins=origins)
     kwargs = {"instructions": INSTRUCTIONS, "log_level": "WARNING"}
     sig_params = inspect.signature(FastMCP.__init__).parameters
     if "stateless_http" in sig_params:
@@ -240,6 +251,20 @@ def build_mcp(relay: Relay, fixed_agent: Agent | None = None) -> FastMCP:
             "transport_security": sec,
         })
     mcp = FastMCP("zoth-relay", **kwargs)
+    if hasattr(mcp, "streamable_http_app"):
+        orig_streamable = mcp.streamable_http_app
+        streamable_params = inspect.signature(orig_streamable).parameters
+        def _compat_streamable(*args, **kwargs):
+            if "transport_security" in streamable_params:
+                kwargs.setdefault("transport_security", sec)
+            if "stateless_http" in streamable_params:
+                kwargs.setdefault("stateless_http", True)
+            if "json_response" in streamable_params:
+                kwargs.setdefault("json_response", True)
+            return orig_streamable(*args, **kwargs)
+        mcp.streamable_http_app = _compat_streamable
+    if not hasattr(mcp, "_mcp_server"):
+        mcp._mcp_server = getattr(mcp, "_lowlevel_server", getattr(mcp, "server", mcp))
     _register(mcp, _local_backend(relay, fixed_agent))
     return mcp
 
