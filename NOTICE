@@ -1,0 +1,65 @@
+# FieldKit by NullAI — Legal Notices & Disclosures
+
+FieldKit (Spotter)
+Copyright (c) 2026 Neal Frazier (Neal Frazier Tech) & NullAI Platform (@1nc0gn30).
+All rights reserved.
+
+---
+
+## 1. Hackathon Submission & Trademark Disclaimers
+
+FieldKit is an independent hackathon software project designed, engineered, and submitted by Neal Frazier Tech / NullAI Platform for the **Meta Global AI Developer Hackathon 2026**.
+
+- **Ray-Ban**, **Meta**, **Meta AI**, **Llama**, **Meta Wearables DAT SDK**, and associated marks, logos, and trade dress are trademarks or registered trademarks of Meta Platforms, Inc., EssilorLuxottica, or their respective affiliates.
+- FieldKit is **not** created, endorsed, certified, or sponsored by Meta Platforms, Inc. or EssilorLuxottica.
+- All references to Meta models, APIs, and wearable hardware are for technical interoperability, research, and hackathon evaluation purposes under applicable fair use and developer platform terms.
+
+---
+
+## 2. Privacy, Local Enclave & Cryptography Notice
+
+FieldKit enforces strict, hardware-bound privacy invariants:
+- **On-Device Embeddings**: Person appearance representations and face vectors are computed locally via Google MediaPipe on the wearer's smartphone. Raw biometric templates are never uploaded to central cloud databases.
+- **Android Keystore Encryption**: Names, voice notes, and contact vectors stored in `PeopleVault` are encrypted at rest using Android Keystore hardware-backed **AES-256-GCM** keys (`tech.nullai.fieldkit.people`).
+- **Zero Passive Cloud Storage**: Ambient camera frames processed through the relay are streamed in-memory and discarded upon step analysis; no video archive of strangers or surrounding environments is retained.
+- **Wearer Voice Lock**: Wake triggers and hands-free mission commands are verified against wearer acoustic signatures to prevent unauthorized bystander trigger injection.
+
+---
+
+## 3. Third-Party Open Source Components
+
+This product incorporates, interfaces with, or depends on the following open source libraries and specifications:
+
+1. **Google MediaPipe**:
+   - Copyright (c) Google LLC.
+   - Licensed under the Apache License, Version 2.0.
+   - Used for on-device face/person detection and bounding box telemetry.
+
+2. **FastMCP / Model Context Protocol (MCP)**:
+   - Copyright (c) Anthropic, PBC.
+   - Licensed under the MIT License.
+   - Powers the local relay agent bridge (`fastmcp` / JSON-RPC).
+
+3. **FFmpeg & libavcodec / libavformat**:
+   - Licensed under the GNU Lesser General Public License (LGPL) version 2.1 or later (and GPL where components require).
+   - Utilized as a subprocess companion for RTMP live streaming with silent AAC audio clock synchronization.
+
+4. **Opus Codec**:
+   - Copyright (c) Xiph.Org Foundation, Skype Limited, Octasic, Jean-Marc Valin, et al.
+   - Licensed under the BSD 3-Clause License.
+   - Utilized for real-time low-latency voice streaming.
+
+5. **Llama 3.2 & Spark Open (via Baseten)**:
+   - Provided under the Llama 3.2 Community License Agreement.
+   - Utilized as zero-latency local/cloud fallback for mission planning and vision verification.
+
+---
+
+## 4. Open-Access Architecture & Support
+
+In accordance with NullAI Platform and Neal Frazier Tech sovereign standards:
+- FieldKit is **100% unlocked, open-access, and free of paywalls, subscription gates, or forced license locks**.
+- Community contributions and developer tips are accepted voluntarily via:
+  - **Stripe**: https://buy.stripe.com/3cIfZg27PdKo2D64Ocfw40X
+  - **Solana Tip Address**: `GG2eQbVh8ut1BK6j1A2tz7pSySdLpD38BgyEhGcxdXoK`
+- Primary Hub: https://nealfrazier.tech · https://nullai.tech · https://github.com/1nc0gn30
