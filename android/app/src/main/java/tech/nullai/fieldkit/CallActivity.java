@@ -219,7 +219,9 @@ public final class CallActivity extends Activity {
         voiceLockEnabled = getSharedPreferences("fieldkit", MODE_PRIVATE).getBoolean("voice_lock_enabled", true);
         updateVoiceLockButtonUi();
         if (voiceLockBtn != null) {
-            voiceLockBtn.setOnClickListener(v -> showVoiceLockDialog());
+            voiceLockBtn.setOnClickListener(v -> {
+                startActivity(new android.content.Intent(this, VoiceGateActivity.class));
+            });
         }
 
         if (devBtn != null) {
@@ -444,14 +446,18 @@ public final class CallActivity extends Activity {
         boolean enrolled = (call != null && call.isVoiceEnrolled())
                 || tech.nullai.fieldkit.voice.OwnerPrintPrefs.load(this).isEnrolled();
         long blocked = call != null ? call.blockedBystanderCount() : 0L;
-        String msg = "Wearer-Only Voice Lock ensures Muse ONLY listens to YOUR voice and ignores bystanders talking nearby.\n\n"
-                + "• Status: " + (voiceLockEnabled ? "ACTIVE (My Voice Only)" : "OFF (All Voices)") + "\n"
-                + "• Voiceprint: " + (enrolled ? "Enrolled & Locked ✓" : "Auto-locking on your next phrase") + "\n"
-                + "• Bystanders Blocked: " + blocked;
+        String msg = "🎯 HOW WEARER-ONLY VOICE LOCK WORKS:\n\n"
+                + "1. Why use it? It locks the microphone to YOUR vocal frequency so bystanders, TV audio, or coffee shop chatter won't confuse Muse or trigger random answers.\n\n"
+                + "2. How to calibrate: Tap 'Calibrate My Voice Now', then say one clear sentence into your phone or glasses. Spotter immediately learns your tone.\n\n"
+                + "3. Current Status:\n"
+                + "   • Mode: " + (voiceLockEnabled ? "🔒 ACTIVE (My Voice Only)" : "🔓 OFF (Listening to All Voices)") + "\n"
+                + "   • Voiceprint: " + (enrolled ? "Enrolled & Ready ✓" : "Not yet enrolled (Listening to all)") + "\n"
+                + "   • Bystanders Blocked: " + blocked + "\n\n"
+                + "💡 Tip: If you are alone or having trouble being heard, tap 'Turn Lock Off' for instant open-mic mode!";
         new android.app.AlertDialog.Builder(this)
-                .setTitle("🔒 Wearer-Only Voice Lock")
+                .setTitle("🔒 Voice Gate & Tutorial")
                 .setMessage(msg)
-                .setPositiveButton("🎙️ Calibrate My Voice Now", (d, w) -> {
+                .setPositiveButton("🎙️ Calibrate My Voice", (d, w) -> {
                     voiceLockEnabled = true;
                     getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
                             .putBoolean("voice_lock_enabled", true).apply();
@@ -460,8 +466,9 @@ public final class CallActivity extends Activity {
                         call.lockCurrentVoiceNow();
                     }
                     updateVoiceLockButtonUi();
+                    showLiveCaptionBanner("🎙️ Say a sentence now to lock your voice!");
                 })
-                .setNeutralButton(voiceLockEnabled ? "Turn Lock Off" : "Turn Lock On", (d, w) -> {
+                .setNeutralButton(voiceLockEnabled ? "🔓 Turn Lock Off (Open Mic)" : "🔒 Turn Lock On", (d, w) -> {
                     voiceLockEnabled = !voiceLockEnabled;
                     getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
                             .putBoolean("voice_lock_enabled", voiceLockEnabled).apply();
@@ -469,9 +476,9 @@ public final class CallActivity extends Activity {
                     updateVoiceLockButtonUi();
                     showLiveCaptionBanner(voiceLockEnabled
                             ? "🔒 Wearer-Only Voice Lock ENABLED"
-                            : "🔓 Voice Lock paused — listening to all voices");
+                            : "🔓 Voice Lock OFF — Open Mic active");
                 })
-                .setNegativeButton("Close", null)
+                .setNegativeButton("Done", null)
                 .show();
     }
 

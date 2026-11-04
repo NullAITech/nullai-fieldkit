@@ -425,9 +425,9 @@ public final class LiveCall {
             if (!setUp || muted) continue;
 
             // Near-field voice activity threshold (filters room hiss / distant chatter)
-            boolean isSpeech = lvl >= 0.048f;
+            boolean isSpeech = lvl >= 0.045f;
             if (isSpeech) {
-                speechHangoverChunks = 8; // 320 ms smooth speech tail
+                speechHangoverChunks = 4; // 160 ms tight speech tail for immediate end-of-turn detection
                 appendVoicedPcm(buf, n);
                 chunksSinceVerify++;
 
@@ -459,17 +459,17 @@ public final class LiveCall {
                             }
                         } else {
                             SpeakerGate.Verdict v = speakerGate.verify(print);
-                            // Allow small AEC/NS spectral tolerance for live full-duplex mic
-                            boolean isWearer = v.accept || v.score >= Math.max(0.75, speakerGate.getThreshold() - 0.05);
+                            // Relax threshold slightly for full-duplex live speakerphone mic to avoid clipping owner
+                            boolean isWearer = v.accept || v.score >= 0.70;
                             if (!isWearer) {
-                                bystanderBlockChunks = 14; // Block ~560 ms of bystander speech
+                                bystanderBlockChunks = 6; // Block ~240 ms (instead of 560 ms) so quick voice pauses aren't swallowed
                                 blockedBystanderCount++;
                                 long now = System.currentTimeMillis();
-                                if (now - lastBystanderNoticeMs > 3800) {
+                                if (now - lastBystanderNoticeMs > 4000) {
                                     lastBystanderNoticeMs = now;
                                     final int scorePct = Math.max(0, (int) Math.round(v.score * 100));
                                     main.post(() -> listener.onVoiceLockNotice(
-                                            "🛡️ My Voice Lock: ignored bystander voice (" + scorePct + "% match)", true));
+                                            "🛡️ Bystander ignored (" + scorePct + "% match)", true));
                                 }
                             } else {
                                 bystanderBlockChunks = 0;
@@ -596,6 +596,8 @@ public final class LiveCall {
     private void sendVideoFrameInternal(byte[] jpeg, boolean force) {
         WebSocket w = ws;
         if (w == null || !setUp || !videoEnabled || jpeg == null || jpeg.length == 0) return;
+        // Prioritize audio uplink over websocket during active speech: skip non-forced video frames
+        if (!force && (System.currentTimeMillis() - lastWearerSpeechMs < 600)) return;
         long now = System.currentTimeMillis();
         if (!force && (videoSendBusy || now - lastVideoMs < 1000 / VIDEO_MAX_FPS)) return;
         lastVideoMs = now;
@@ -623,9 +625,9 @@ public final class LiveCall {
         }
     }
 
-    /** Downscales large JPEGs to <=480px @ Q72 (~16-24 KB) so frames arrive with minimal latency. */
+    /** Downscales large JPEGs to <=440px @ Q60 (~12-18 KB) so frames arrive with minimal latency. */
     private static byte[] compactJpegForLive(byte[] jpeg) {
-        if (jpeg == null || jpeg.length <= 36_000) return jpeg;
+        if (jpeg == null || jpeg.length <= 20_000) return jpeg;
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
@@ -633,7 +635,7 @@ public final class LiveCall {
             int w = bounds.outWidth, h = bounds.outHeight;
             if (w <= 0 || h <= 0) return jpeg;
             int sample = 1;
-            while (Math.max(w / sample, h / sample) > 640) {
+            while (Math.max(w / sample, h / sample) > 480) {
                 sample *= 2;
             }
             BitmapFactory.Options opts = new BitmapFactory.Options();
@@ -642,8 +644,8 @@ public final class LiveCall {
             if (bmp == null) return jpeg;
             int bw = bmp.getWidth(), bh = bmp.getHeight();
             int maxDim = Math.max(bw, bh);
-            if (maxDim > 480) {
-                float scale = 480f / maxDim;
+            if (maxDim > 440) {
+                float scale = 440f / maxDim;
                 Bitmap scaled = Bitmap.createScaledBitmap(
                         bmp,
                         Math.max(1, Math.round(bw * scale)),
@@ -653,8 +655,8 @@ public final class LiveCall {
                 if (scaled != bmp) bmp.recycle();
                 bmp = scaled;
             }
-            ByteArrayOutputStream bos = new ByteArrayOutputStream(24_576);
-            bmp.compress(Bitmap.CompressFormat.JPEG, 72, bos);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream(16_384);
+            bmp.compress(Bitmap.CompressFormat.JPEG, 60, bos);
             bmp.recycle();
             byte[] out = bos.toByteArray();
             return out.length > 0 && out.length < jpeg.length ? out : jpeg;

@@ -75,6 +75,12 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Dedicated Voice Gate & Tutorial View -->
+        <activity
+            android:name=".VoiceGateActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

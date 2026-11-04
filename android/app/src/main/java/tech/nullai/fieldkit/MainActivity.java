@@ -347,6 +347,11 @@ public class MainActivity extends Activity {
         if (btnMainVoiceTriggers != null) {
             btnMainVoiceTriggers.setOnClickListener(v -> showVoiceTriggersCheatSheet());
         }
+        View btnMainVoiceGate = findViewById(R.id.btnMainVoiceGate);
+        if (btnMainVoiceGate != null) {
+            btnMainVoiceGate.setOnClickListener(v ->
+                    startActivity(new Intent(this, VoiceGateActivity.class)));
+        }
         tvVisionTicker = findViewById(R.id.tvVisionTicker);
         final Button btnMainDevToggle = findViewById(R.id.btnMainDevToggle);
         final TextView tvDevDrawerHeader = findViewById(R.id.tvDevDrawerHeader);

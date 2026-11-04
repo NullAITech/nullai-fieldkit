@@ -205,6 +205,22 @@
                 android:textColor="#FDE68A"
                 android:textSize="11sp"
                 android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnMainVoiceGate"
+                android:contentDescription="Voice Gate and Microphone Settings"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:minHeight="28dp"
+                android:layout_marginStart="6dp"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="0dp"
+                android:background="@drawable/bg_dark_pill"
+                android:text="🔒 Voice Gate"
+                android:textAllCaps="false"
+                android:textColor="#38BDF8"
+                android:textSize="11sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
