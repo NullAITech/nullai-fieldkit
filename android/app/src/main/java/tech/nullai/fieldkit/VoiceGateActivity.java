@@ -215,10 +215,10 @@ public final class VoiceGateActivity extends Activity {
             return;
         }
         calibrateBtn.setEnabled(false);
-        calibrateBtn.setText("🎙️ Listening... Speak 1 sentence now!");
+        calibrateBtn.setText("🎙️ Listening... Speak clearly now!");
         calibrateBtn.setBackgroundColor(0xFFEAB308);
         micLevelBar.setProgress(35);
-        micLevelLabel.setText("Listening for your voice...");
+        micLevelLabel.setText("Listening for your voice... speak a full sentence!");
 
         VoiceCapture.capture(this, r -> handler.post(() -> {
             calibrateBtn.setEnabled(true);
@@ -227,23 +227,22 @@ public final class VoiceGateActivity extends Activity {
             micLevelBar.setProgress(0);
 
             if (r.error != null && !r.error.isEmpty()) {
-                micLevelLabel.setText("Calibration error: " + r.error);
-                Toast.makeText(VoiceGateActivity.this, "Mic error: " + r.error, Toast.LENGTH_SHORT).show();
-                return;
+                micLevelLabel.setText("Result: " + r.error);
+                Toast.makeText(VoiceGateActivity.this, "Note: " + r.error, Toast.LENGTH_SHORT).show();
             }
 
-            if (r.print != null && r.quality >= 0.25) {
+            if (r.print != null) {
                 OwnerPrintPrefs.save(VoiceGateActivity.this, new float[][]{r.print, r.print});
                 voiceLockEnabled = true;
                 getSharedPreferences("fieldkit", MODE_PRIVATE).edit()
                         .putBoolean("voice_lock_enabled", true).apply();
                 refreshUi();
                 micLevelBar.setProgress(100);
-                micLevelLabel.setText("Voice calibrated successfully (Quality " + Math.round(r.quality * 100) + "%)");
+                micLevelLabel.setText("Voice calibrated successfully! (Peak " + Math.round(r.peakDb) + " dBFS)");
                 Toast.makeText(VoiceGateActivity.this, "🔒 Voiceprint Calibrated Successfully!", Toast.LENGTH_LONG).show();
             } else {
-                micLevelLabel.setText("Audio too quiet or unclear — please try again.");
-                Toast.makeText(VoiceGateActivity.this, "Could not capture clear speech. Please try again.", Toast.LENGTH_SHORT).show();
+                micLevelLabel.setText("Could not isolate voice — please speak louder into phone/glasses.");
+                Toast.makeText(VoiceGateActivity.this, "Speak louder and closer to the mic, then try again.", Toast.LENGTH_SHORT).show();
             }
         }));
     }

@@ -24,14 +24,14 @@ public final class UtteranceSegmenter {
     /** Feed blocks of this length; everything downstream assumes it. */
     public static final int BLOCK_MS = 100;
 
-    /** Speech onset threshold. Same value the one-shot capture has always used. */
-    public static final double START_DB = -42.0;
+    /** Speech onset threshold (-56 dBFS catches quiet/conversational speech and Bluetooth mics). */
+    public static final double START_DB = -56.0;
 
     /** Level that counts as trailing silence. */
-    public static final double STOP_DB = -48.0;
+    public static final double STOP_DB = -62.0;
 
-    /** Shorter than this is not an utterance. */
-    public static final int MIN_MS = 400;
+    /** Shorter than this is not an utterance (200ms allows short phrases). */
+    public static final int MIN_MS = 200;
 
     /** Pause that ends the utterance. */
     public static final int STOP_SILENCE_MS = 700;
