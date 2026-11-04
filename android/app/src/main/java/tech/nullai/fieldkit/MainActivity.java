@@ -1381,12 +1381,9 @@ public class MainActivity extends Activity {
      */
     private void talk() {
         if (soundField != null) soundField.stop();   // free the mic for our capture
-        if (!VoiceCapture.available(this)) {
-            listen(null);                            // no mic permission: the plain recognizer
-            return;
-        }
-        status("Listening \u2014 speak, then pause.");
-        VoiceCapture.capture(this, this::onUtterance);
+        status("Listening \u2014 speak now…");
+        showMainLiveCaption("🎙️ Listening — speak your goal or question now…");
+        listen(null);
     }
 
     /** Called off the UI thread with the utterance the gate just listened to. */
@@ -1399,7 +1396,7 @@ public class MainActivity extends Activity {
                     : "Heard no clear near-field speech (" + r.describe() + "). Speak clearly and tap Talk."));
             return;
         }
-        boolean lockEnabled = prefs == null || prefs.getBoolean("voice_lock_enabled", true);
+        boolean lockEnabled = prefs != null && prefs.getBoolean("voice_lock_enabled", false);
         if (!voiceGate.isEnrolled() && r.print != null && r.quality >= 0.22) {
             // Auto-lock to the wearer's voice on first clear utterance
             enrolTakes = new float[][]{r.print, r.print};
@@ -1418,7 +1415,7 @@ public class MainActivity extends Activity {
         SpeakerGate.Verdict v = voiceGate.isEnrolled() && r.print != null ? voiceGate.verify(r.print) : null;
         boolean acceptedWearer = (v == null)
                 || v.accept
-                || (v.score >= Math.max(0.75, voiceGate.getThreshold() - 0.04));
+                || (v.score >= Math.max(0.60, voiceGate.getThreshold() - 0.15));
         if (lockEnabled && voiceGate.isEnrolled() && !acceptedWearer) {
             lastSpeaker = "other";
             LockedListener.discard(r.wav);
@@ -1880,7 +1877,7 @@ public class MainActivity extends Activity {
     }
 
     private void voiceTap() {
-        boolean lockEnabled = prefs == null || prefs.getBoolean("voice_lock_enabled", true);
+        boolean lockEnabled = prefs != null && prefs.getBoolean("voice_lock_enabled", false);
         if (voiceGate.isEnrolled()) {
             new AlertDialog.Builder(this)
                     .setTitle("🔒 Wearer-Only Voice Lock")
@@ -2131,6 +2128,7 @@ public class MainActivity extends Activity {
             String text = heard.get(0);
             if (kept == null) etGoal.setText(text);
             try {
+                sendWs(new JSONObject().put("type", "resume"));
                 JSONObject msg = new JSONObject();
                 msg.put("type", "speech");
                 msg.put("text", text);
@@ -2152,9 +2150,13 @@ public class MainActivity extends Activity {
                 sendWs(msg);
             } catch (Exception ignored) { }
             if (kept == null) {
-                status("Heard (" + lastSpeaker + "): " + text);
+                status("Heard: " + text);
                 showMainLiveCaption("🎙️ YOU: " + text);
                 ConversationStore.get(this).appendMessage(activeConvId, "You", text);
+                WakePhrase.Result wp = WakePhrase.parse(text);
+                if (wp == null || !wp.isCommand()) {
+                    startMission();
+                }
             } else {
                 keptBeingTranscribed = null;
                 LockedListener.discard(kept);

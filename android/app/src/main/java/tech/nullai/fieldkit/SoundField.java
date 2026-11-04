@@ -51,8 +51,14 @@ public final class SoundField {
         AudioRecord r = rec;
         if (r != null) {
             try { r.stop(); } catch (Exception ignored) { }
+            try { r.release(); } catch (Exception ignored) { }
+            rec = null;
         }
-        if (thread != null) thread.interrupt();
+        if (thread != null) {
+            thread.interrupt();
+            try { thread.join(300); } catch (Exception ignored) { }
+            thread = null;
+        }
     }
 
     private AudioRecord open(int source, int channelMask) {
