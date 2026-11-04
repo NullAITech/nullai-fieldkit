@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -732,7 +733,7 @@ public final class CallActivity extends Activity {
         started = true;
         previousGlassesListener = DatGlasses.INSTANCE.getListener();
         DatGlasses.INSTANCE.setListener(callEyes);
-        call = new LiveCall(relay, token, buildSavedPeopleContext(), callListener);
+        call = new LiveCall(this, relay, token, buildSavedPeopleContext(), callListener);
         call.configureVoiceLock(this, voiceLockEnabled);
         if (videoOn) call.setVideoEnabled(true);
         call.start();
@@ -914,7 +915,17 @@ public final class CallActivity extends Activity {
     private static Bitmap decodeFrame(byte[] jpeg) {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inSampleSize = 2;
-        return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
+        Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
+        if (bmp != null && bmp.getWidth() > bmp.getHeight()) {
+            Matrix m = new Matrix();
+            m.postRotate(90);
+            Bitmap rot = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+            if (rot != bmp) {
+                bmp.recycle();
+            }
+            return rot;
+        }
+        return bmp;
     }
 
     private String pendingMatchId = "";

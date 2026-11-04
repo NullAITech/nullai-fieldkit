@@ -130,6 +130,11 @@ public final class LiveCall {
     private final StringBuilder museTurnBuf = new StringBuilder();
     private final StringBuilder userTurnBuf = new StringBuilder();
 
+    public LiveCall(Context ctx, String relayBase, String agentToken, String initialMission, Listener listener) {
+        this(relayBase, agentToken, initialMission, listener);
+        if (ctx != null) this.appCtx = ctx.getApplicationContext();
+    }
+
     public LiveCall(String relayBase, String agentToken, Listener listener) {
         this(relayBase, agentToken, "", listener);
     }
@@ -334,6 +339,13 @@ public final class LiveCall {
     private void startAudio() {
         try {
             playing = true;
+            if (appCtx != null) {
+                AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+                if (am != null) {
+                    am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                    am.setSpeakerphoneOn(true);
+                }
+            }
             if (record == null) {
                 int minBuf = AudioRecord.getMinBufferSize(IN_RATE,
                         AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -364,7 +376,7 @@ public final class LiveCall {
                         AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
                 AudioTrack.Builder tb = new AudioTrack.Builder()
                         .setAudioAttributes(new AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
                                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                                 .setFlags(AudioAttributes.FLAG_LOW_LATENCY)
                                 .build())
@@ -545,6 +557,14 @@ public final class LiveCall {
 
     private void stopAudio() {
         playing = false;
+        try {
+            if (appCtx != null) {
+                AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+                if (am != null) {
+                    am.setMode(AudioManager.MODE_NORMAL);
+                }
+            }
+        } catch (Throwable ignored) {}
         synchronized (outLock) { outQueue.clear(); outLock.notifyAll(); }
         if (record != null) {
             try { record.stop(); } catch (Exception ignored) { }

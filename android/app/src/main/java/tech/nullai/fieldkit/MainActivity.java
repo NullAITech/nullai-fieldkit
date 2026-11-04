@@ -27,8 +27,10 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
+import android.media.AudioAttributes;
 import android.media.ImageReader;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -400,7 +402,15 @@ public class MainActivity extends Activity {
         providerName = p.getString("provider", providerName);
 
         tts = new TextToSpeech(this, s -> {
-            if (s == TextToSpeech.SUCCESS) tts.setLanguage(Locale.US);
+            if (s == TextToSpeech.SUCCESS) {
+                tts.setLanguage(Locale.US);
+                if (Build.VERSION.SDK_INT >= 21) {
+                    tts.setAudioAttributes(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build());
+                }
+            }
         });
 
         DatGlasses.INSTANCE.init(this);

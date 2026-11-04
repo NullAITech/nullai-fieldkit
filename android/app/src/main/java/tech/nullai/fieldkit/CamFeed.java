@@ -68,6 +68,9 @@ public final class CamFeed {
             }
             if (id == null) return;
             final Size size = pickSize(cm, id);
+            CameraCharacteristics chars = cm.getCameraCharacteristics(id);
+            Integer sensorOrient = chars.get(CameraCharacteristics.SENSOR_ORIENTATION);
+            final int orient = (sensorOrient != null) ? sensorOrient : 90;
             reader = ImageReader.newInstance(size.getWidth(), size.getHeight(), ImageFormat.JPEG, 3);
             reader.setOnImageAvailableListener(r -> {
                 Image img = null;
@@ -112,8 +115,9 @@ public final class CamFeed {
                                                     android.hardware.camera2.CameraMetadata.CONTROL_MODE_AUTO);
                                             b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
                                                     new android.util.Range<>(15, 30));
-                                            // The camera encodes; we only ask for the quality.
+                                            // The camera encodes; we only ask for the quality and sensor orientation.
                                             b.set(CaptureRequest.JPEG_QUALITY, (byte) JPEG_QUALITY);
+                                            b.set(CaptureRequest.JPEG_ORIENTATION, orient);
                                             s.setRepeatingRequest(b.build(), null, handler);
                                         } catch (Exception e) {
                                             Log.w(TAG, "repeating request failed: " + e);

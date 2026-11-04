@@ -10,6 +10,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -198,6 +199,13 @@ public final class DemoRecorder {
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 Bitmap bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
                 if (bmp != null) {
+                    if (!fromGlasses && bmp.getWidth() > bmp.getHeight()) {
+                        Matrix m = new Matrix();
+                        m.postRotate(90);
+                        Bitmap rot = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+                        if (rot != bmp) bmp.recycle();
+                        bmp = rot;
+                    }
                     latestFrameBmp = bmp;
                     latestFrameAtMs = System.currentTimeMillis();
                 }
@@ -212,7 +220,13 @@ public final class DemoRecorder {
         this.sourceLabel = fromGlasses ? "RAY-BAN META 01QV · LIVE POV" : "PHONE CAMERA · LIVE POV";
         if (!recording) return;
         try {
-            latestFrameBmp = bmp.copy(Bitmap.Config.ARGB_8888, false);
+            Bitmap src = bmp;
+            if (!fromGlasses && src.getWidth() > src.getHeight()) {
+                Matrix m = new Matrix();
+                m.postRotate(90);
+                src = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), m, true);
+            }
+            latestFrameBmp = src.copy(Bitmap.Config.ARGB_8888, false);
             latestFrameAtMs = System.currentTimeMillis();
         } catch (Throwable ignored) {}
     }
