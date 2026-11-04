@@ -5,7 +5,7 @@ import android.content.SharedPreferences;
 
 /**
  * The 4 canonical Spotter Persona Modes:
- * 1. INTEL ("Person & Intel Recon"): Character Boards, facial recognition, social dossiers, VIP tracking.
+ * 1. INTEL ("People & Intel"): Consent-first Character Boards, wearer-saved people memory, mutual networking.
  * 2. GOD_VOICE ("Conscious & Subconscious Voice"): God's voice in your ear, quiet inner guidance, higher intuition.
  * 3. VIBE_CODER ("Vibe Coder Wingman"): Screen pair-programmer, code review, debugging, terminal wingman.
  * 4. DIRECTIVE ("Custom Autonomous Directive"): Wearer specifies their exact objective (e.g. sell web services).
@@ -40,11 +40,11 @@ public final class SpotterMode {
                     MODE_INTEL,
                     "Intel & People",
                     "👥",
-                    "Character Boards & Social Dossier",
-                    "Recognize people, recall names & attire, and suggest smooth openers.",
-                    "Goal mode INTEL: The wearer is networking, meeting people, or conducting social recon. "
-                            + "Identify people in view using the Saved People roster and 4-Angle Character Boards. "
-                            + "Suggest natural, confident openers tied to what is seen, note attire and expressions, "
+                    "Consent-First Character Boards",
+                    "Recall saved teammates & friends, recognize attire & context, and suggest smooth openers.",
+                    "Goal mode INTEL: The wearer is networking, meeting colleagues, or greeting saved contacts. "
+                            + "Identify people in view using the wearer's consent-first Saved People roster and 4-Angle Character Boards. "
+                            + "Suggest natural, confident openers tied to what is seen, note attire and context, "
                             + "and help remember names and follow-ups. Speak concisely into the wearer's ear."
             ),
             new ModeInfo(

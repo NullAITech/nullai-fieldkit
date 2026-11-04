@@ -19,11 +19,11 @@ from pathlib import Path
 MODES: dict[str, dict] = {
     "intel": {
         "label": "Intel & People",
-        "blurb": "Character Boards, facial recognition, social dossiers, VIP tracking.",
-        "prompt": ("Goal mode INTEL & RECON: the wearer is networking, meeting people, or conducting "
-                   "social recon. Identify people in view using the Saved People roster and 4-Angle "
+        "blurb": "Consent-first Character Boards, wearer-saved people memory, mutual networking.",
+        "prompt": ("Goal mode INTEL & PEOPLE: the wearer is networking, meeting colleagues, or greeting saved "
+                   "contacts. Identify people in view using the wearer's consent-first Saved People roster and 4-Angle "
                    "Character Boards. Suggest natural, confident openers tied to what is seen, note attire "
-                   "and expressions, and help remember names and follow-ups. Speak concisely into the wearer's ear."),
+                   "and context, and help remember names and follow-ups. Speak concisely into the wearer's ear."),
         "questions": ["Where are you (conference, meetup, pitch, event)?",
                       "What kind of people or partners are you looking to meet?"],
         "map": False,
@@ -63,9 +63,9 @@ MODES: dict[str, dict] = {
     # Aliases for backward compatibility
     "network": {
         "label": "Intel & People",
-        "blurb": "Character Boards, facial recognition, social dossiers, VIP tracking.",
-        "prompt": ("Goal mode INTEL & RECON: the wearer is networking, meeting people, or conducting "
-                   "social recon. Identify people in view using the Saved People roster and 4-Angle "
+        "blurb": "Consent-first Character Boards, wearer-saved people memory, mutual networking.",
+        "prompt": ("Goal mode INTEL & PEOPLE: the wearer is networking, meeting colleagues, or greeting saved "
+                   "contacts. Identify people in view using the wearer's consent-first Saved People roster and 4-Angle "
                    "Character Boards. Suggest natural, confident openers tied to what is seen."),
         "questions": ["Where are you (event, bar, campus, conference)?",
                       "What kind of people do you want to meet?"],

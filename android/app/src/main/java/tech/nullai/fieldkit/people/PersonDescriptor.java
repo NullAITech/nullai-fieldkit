@@ -146,7 +146,7 @@ public final class PersonDescriptor {
                 double dx = lum(argb[y * w + x + 1]) - lum(argb[y * w + x - 1]);
                 double dy = lum(argb[(y + 1) * w + x]) - lum(argb[(y - 1) * w + x]);
                 double mag = Math.abs(dx) + Math.abs(dy);
-                if (mag < 12) continue;
+                if (mag < 12.0 / 255.0) continue;   // lum() is 0..1; 12 is the 0..255-scale threshold
                 double ang = Math.atan2(dy, dx);                   // -pi..pi
                 if (ang < 0) ang += Math.PI;                       // 0..pi (unsigned)
                 int bin = (int) (ang / Math.PI * GRAD) % GRAD;
@@ -275,7 +275,7 @@ public final class PersonDescriptor {
                 double dx = lum(argb[y * w + x + 1]) - lum(argb[y * w + x - 1]);
                 double dy = lum(argb[(y + 1) * w + x]) - lum(argb[(y - 1) * w + x]);
                 double mag = Math.abs(dx) + Math.abs(dy);
-                if (mag < 10) continue;
+                if (mag < 10.0 / 255.0) continue;   // lum() is 0..1; 10 is the 0..255-scale threshold
                 double ang = Math.atan2(dy, dx);
                 if (ang < 0) ang += Math.PI;
                 int bin = (int) (ang / Math.PI * BODY_GRAD) % BODY_GRAD;

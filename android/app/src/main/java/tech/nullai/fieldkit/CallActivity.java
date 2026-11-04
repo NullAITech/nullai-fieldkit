@@ -74,8 +74,11 @@ public final class CallActivity extends Activity {
     private boolean captionsEnabled = true;
     private String activeConvId;
     private String lastStreamingSpeaker = "";
+    private String lastStreamingCaptionLine = "";
     private String lastPersistedMuseText = "";
     private String lastPersistedUserText = "";
+    private WakePhrase.Command lastExecutedCallCommand = null;
+    private long lastExecutedCallCommandMs = 0L;
 
     public static volatile boolean LIVE = false;
     private long lastMeterLog;
@@ -455,31 +458,37 @@ public final class CallActivity extends Activity {
         // Update live subtitle overlay
         showLiveCaptionBanner((fromWearer ? "🎙️ YOU: " : "🔊 MUSE AI: ") + clean);
 
-        // Update rolling caption log without spamming duplicate partial prefixes
+        // Update rolling caption log: replace this speaker's previous streaming
+        // snapshot wherever it sits (a "· notice" caption may intervene), so
+        // growing partials never stack up as duplicate lines.
         String speakerKey = fromWearer ? "You" : "Muse";
-        if (speakerKey.equals(lastStreamingSpeaker) && !captions.isEmpty()) {
-            String last = captions.peekLast();
-            if (last != null && last.startsWith(prefix)) {
-                captions.removeLast();
-            }
+        if (speakerKey.equals(lastStreamingSpeaker) && !lastStreamingCaptionLine.isEmpty()) {
+            captions.remove(lastStreamingCaptionLine);
         }
         lastStreamingSpeaker = speakerKey;
+        lastStreamingCaptionLine = line;
         addCaption(line);
 
-        // Persist to ConversationStore when sentence grows or changes meaningfully
+        // Persist one turn per utterance: LiveCall sends cumulative snapshots,
+        // so upsert while the snapshot grows instead of appending each partial.
         if (fromWearer) {
             WakePhrase.Result wp = WakePhrase.parse(clean);
             if (wp != null && wp.isCommand()) {
-                executeCallSpokenCommand(wp.command);
+                long now = System.currentTimeMillis();
+                if (wp.command != lastExecutedCallCommand || now - lastExecutedCallCommandMs > 5000L) {
+                    lastExecutedCallCommand = wp.command;
+                    lastExecutedCallCommandMs = now;
+                    executeCallSpokenCommand(wp.command);
+                }
             }
-            if (!clean.equals(lastPersistedUserText) && (clean.length() > 12 || clean.endsWith(".") || clean.endsWith("?"))) {
+            if (!clean.equals(lastPersistedUserText)) {
                 lastPersistedUserText = clean;
-                ConversationStore.get(this).appendMessage(activeConvId, "You", clean);
+                ConversationStore.get(this).appendStreamingMessage(activeConvId, "You", clean);
             }
         } else {
-            if (!clean.equals(lastPersistedMuseText) && (clean.length() > 18 || clean.endsWith(".") || clean.endsWith("!") || clean.endsWith("?"))) {
+            if (!clean.equals(lastPersistedMuseText)) {
                 lastPersistedMuseText = clean;
-                ConversationStore.get(this).appendMessage(activeConvId, "Muse", clean);
+                ConversationStore.get(this).appendStreamingMessage(activeConvId, "Muse", clean);
             }
         }
     }
@@ -585,6 +594,7 @@ public final class CallActivity extends Activity {
                         || ConversationsActivity.ACTION_NEW_CHAT.equals(action)) {
                     captions.clear();
                     lastStreamingSpeaker = "";
+                    lastStreamingCaptionLine = "";
                     log.setText("New conversation started.");
                     showLiveCaptionBanner("✨ Started new conversation thread");
                     if (call != null) {
@@ -646,7 +656,6 @@ public final class CallActivity extends Activity {
 
     private void open() {
         if (started) return;
-        LIVE = true;
         String relay = getIntent().getStringExtra(EXTRA_RELAY);
         String token = getIntent().getStringExtra(EXTRA_TOKEN);
         if (relay == null || token == null) {
@@ -655,9 +664,11 @@ public final class CallActivity extends Activity {
             if (token == null) token = p.getString("token", null);
         }
         if (relay == null || token == null) {
+            LIVE = false;
             setState("No relay token — launch the call from the Fieldkit home screen.");
             return;
         }
+        LIVE = true;
         started = true;
         previousGlassesListener = DatGlasses.INSTANCE.getListener();
         DatGlasses.INSTANCE.setListener(callEyes);

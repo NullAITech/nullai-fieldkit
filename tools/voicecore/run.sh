@@ -26,7 +26,8 @@ rm -rf "$out"; mkdir -p "$out"
 
 mapfile -t files < <(find "$src/voice" "$src/people" -name '*.java' \
     ! -name 'VoiceCapture.java' ! -name 'LockedListener.java' \
-    ! -name 'OwnerPrintPrefs.java' | sort)
+    ! -name 'OwnerPrintPrefs.java' \
+    ! -name 'CharacterBoard.java' ! -name 'PeopleVault.java' ! -name 'PeopleActivity.java' | sort)
 [ "${#files[@]}" -gt 0 ] || { echo "no Android-free sources found" >&2; exit 2; }
 
 echo "compiling ${#files[@]} Android-free sources"

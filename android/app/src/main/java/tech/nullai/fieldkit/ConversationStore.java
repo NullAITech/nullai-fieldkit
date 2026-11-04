@@ -128,6 +128,29 @@ public final class ConversationStore {
         appendTurn(speaker, text, c != null ? c.mode : "Mission Coach", c != null ? c.source : "Ray-Ban Meta");
     }
 
+    /** Streaming transcripts arrive as growing cumulative snapshots of one turn:
+     *  replace the last same-speaker turn while it is still a prefix of the new
+     *  snapshot instead of persisting every partial as its own turn. */
+    public synchronized void appendStreamingMessage(String convId, String speaker, String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        if (convId != null && !convId.isEmpty()) setActiveId(convId);
+        Conversation c = active();
+        if (c == null) return;
+        String clean = text.trim();
+        if (!c.turns.isEmpty()) {
+            Turn last = c.turns.get(c.turns.size() - 1);
+            if (last.speaker.equals(speaker)
+                    && (clean.startsWith(last.text) || last.text.startsWith(clean))) {
+                last.text = clean;
+                last.timestamp = System.currentTimeMillis();
+                c.updatedAt = last.timestamp;
+                save();
+                return;
+            }
+        }
+        appendMessage(convId, speaker, clean);
+    }
+
     public synchronized void setActiveId(String id) {
         Conversation c = find(id);
         if (c != null) {

@@ -47,7 +47,9 @@ public final class WakePhrase {
     /** Words that turn a match back into ordinary talk ("the spotter's guide said to activate it"). */
     private static final Set<String> CONTAMINANTS = new HashSet<>(Arrays.asList(
             "if", "unless", "when", "whenever", "would", "should", "could", "did", "does",
-            "not", "dont", "didnt", "doesnt", "cant", "wont", "maybe", "might", "wondering",
+            "not", "no", "never", "dont", "didnt", "doesnt", "cant", "wont", "shouldnt", "wouldnt",
+            "don't", "didn't", "doesn't", "can't", "won't", "shouldn't", "wouldn't",
+            "maybe", "might", "wondering",
             "said", "says", "asked", "tell", "told", "asked", "s", "is", "was", "were", "be",
             "guidebook", "yuan", "decided", "wanted", "trying", "tried"
     ));
@@ -108,7 +110,7 @@ public final class WakePhrase {
         SPECS.add(new Spec(Command.CHARACTER_LOCK, new String[]{"character", "lock"}, "lock", "snap"));
         SPECS.add(new Spec(Command.TIMELINE_ECHO, new String[]{"timeline", "echo"}, "echo", "log"));
         SPECS.add(new Spec(Command.ORACLE_WHISPER, new String[]{"oracle", "whisper"}, "whisper"));
-        SPECS.add(new Spec(Command.SYNTAX_MATRIX, new String[]{"syntax", "matrix"}, "inspect", "debug"));
+        SPECS.add(new Spec(Command.SYNTAX_MATRIX, new String[]{"matrix", "inspect"}, "matrix", "inspect", "debug"));
         SPECS.add(new Spec(Command.SOCIAL_RECON, new String[]{"social", "recon"}, "recon", "people"));
         SPECS.add(new Spec(Command.SOVEREIGN_VECTOR, new String[]{"sovereign", "vector"}, "vector", "goal"));
     }
@@ -143,7 +145,11 @@ public final class WakePhrase {
 
     public static List<String> tokenize(String utterance) {
         if (utterance == null) return Collections.emptyList();
-        String s = utterance.toLowerCase(Locale.US).replaceAll("[^a-z0-9']+", " ").trim();
+        // Normalize apostrophes and contractions so "don't" -> "dont"
+        String s = utterance.toLowerCase(Locale.US)
+                .replaceAll("['’]", "")
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
         if (s.isEmpty()) return Collections.emptyList();
         return Arrays.asList(s.split("\\s+"));
     }
@@ -153,31 +159,35 @@ public final class WakePhrase {
         List<String> t = tokenize(utterance);
         if (t.isEmpty()) return new Result(Command.NONE, 0.0, false, "");
 
-        int anchor = -1;
-        boolean rare = false;
+        Result globalBest = new Result(Command.NONE, 0.0, false, "");
+
+        // Find all possible anchor positions in the utterance
         for (int i = 0; i < t.size(); i++) {
             String w = t.get(i);
-            if (matches(ANCHORS_PRIMARY, w)) { anchor = i; break; }
-            if (matches(ANCHORS_RARE, w)) { anchor = i; rare = true; break; }
-        }
-        if (anchor < 0) return new Result(Command.NONE, 0.0, false, "");
+            boolean rare = matches(ANCHORS_RARE, w);
+            boolean isAnchor = rare || matches(ANCHORS_PRIMARY, w);
+            if (!isAnchor) continue;
 
-        // A long utterance that merely contains the anchor is conversation, not a command,
-        // unless the anchor leads it ("spotter, ..." / "hey spotter ...").
-        boolean leads = anchor <= 1;
-        if (!leads && t.size() - anchor > MAX_SPAN) {
-            return new Result(Command.NONE, 0.0, true, join(t, anchor, t.size()));
-        }
+            int anchor = i;
+            boolean leads = anchor <= 1;
+            if (!leads && t.size() - anchor > MAX_SPAN) {
+                if (!globalBest.anchored) {
+                    globalBest = new Result(Command.NONE, 0.0, true, join(t, anchor, t.size()));
+                }
+                continue;
+            }
 
-        Result best = new Result(Command.NONE, 0.0, true, "");
-        for (Spec spec : SPECS) {
-            Result r = match(spec, t, anchor, rare);
-            if (r != null && r.confidence > best.confidence) best = r;
+            for (Spec spec : SPECS) {
+                Result r = match(spec, t, anchor, rare);
+                if (r != null && r.confidence > globalBest.confidence) {
+                    globalBest = r;
+                }
+            }
+            if (globalBest.command == Command.NONE && !globalBest.anchored) {
+                globalBest = new Result(Command.NONE, 0.0, true, join(t, anchor, Math.min(t.size(), anchor + MAX_SPAN)));
+            }
         }
-        if (best.command == Command.NONE) {
-            return new Result(Command.NONE, 0.0, true, join(t, anchor, Math.min(t.size(), anchor + MAX_SPAN)));
-        }
-        return best;
+        return globalBest;
     }
 
     /**

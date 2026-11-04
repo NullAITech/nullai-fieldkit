@@ -39,6 +39,31 @@ public class VoiceCoreTest {
         expect(WakePhrase.Command.PERSON_WHO, "spotter who is this");
         expect(WakePhrase.Command.SOUL_SYNC, "spotter soul sync");
 
+        System.out.println("\n== WakePhrase: the 10 preset phrases must fire ==");
+        expect(WakePhrase.Command.PROTOCOL_ZERO, "zoth protocol zero");
+        expect(WakePhrase.Command.GHOST_VEIL, "obsidian ghost veil");
+        expect(WakePhrase.Command.SOUL_AWAKEN, "zoth soul awaken");
+        expect(WakePhrase.Command.HORIZON_SEVER, "aperture horizon sever");
+        expect(WakePhrase.Command.CHARACTER_LOCK, "chrono character lock");
+        expect(WakePhrase.Command.TIMELINE_ECHO, "vision timeline echo");
+        expect(WakePhrase.Command.ORACLE_WHISPER, "silent oracle whisper");
+        expect(WakePhrase.Command.SYNTAX_MATRIX, "syntax matrix inspect");
+        expect(WakePhrase.Command.SYNTAX_MATRIX, "syntax matrix debug");
+        expect(WakePhrase.Command.SOCIAL_RECON, "tactical social recon");
+        expect(WakePhrase.Command.SOVEREIGN_VECTOR, "starlight sovereign vector");
+
+        System.out.println("\n== WakePhrase: rare anchor + contractions ==");
+        WakePhrase.Result rare = WakePhrase.parse("zoth guide mode please activate");
+        WakePhrase.Result common = WakePhrase.parse("spotter guide mode please activate");
+        ok(rare.confidence > common.confidence,
+                "rare anchor earns its bonus (rare=" + rare.confidence + " common=" + common.confidence + ")");
+        ok(WakePhrase.tokenize("don't").contains("dont"), "\"don't\" tokenizes to contaminant \"dont\"");
+        ok(!WakePhrase.tokenize("spotter's").equals(Arrays.asList("spotter")),
+                "\"spotter's\" never tokenizes to the bare anchor (got " + WakePhrase.tokenize("spotter's") + ")");
+        reject("hey spotter's guide mode activate");
+        reject("spotter don't guide mode activate");
+        reject("spotter can't guide mode activate");
+
         System.out.println("\n== WakePhrase: ordinary conversation must NOT fire ==");
         reject("so the spotter said the guide was fine and I should activate it later");
         reject("the spotter's guide said to activate the mode");
@@ -112,6 +137,11 @@ public class VoiceCoreTest {
         double sDiff = PersonDescriptor.similarity(dAlice, dBob);
         System.out.printf("  same-person sim=%.3f  different-person sim=%.3f%n", sSame, sDiff);
         ok(sSame > sDiff + 0.10, "same person scores clearly above a different person");
+
+        int gbase = PersonDescriptor.GREY * PersonDescriptor.GREY + PersonDescriptor.COL * PersonDescriptor.COL * 3;
+        boolean gradNonZero = false;
+        for (int i = gbase; i < PersonDescriptor.DIMS; i++) gradNonZero |= dAlice[i] != 0f;
+        ok(gradNonZero, "face gradient-orientation bins are populated (lum is 0..1, threshold must be < 1)");
 
         List<float[]> known = new ArrayList<>(Arrays.asList(dAlice));
         PersonDescriptor.Match m = PersonDescriptor.best(dAlice2, known, PersonDescriptor.DEFAULT_THRESHOLD, PersonDescriptor.MARGIN);

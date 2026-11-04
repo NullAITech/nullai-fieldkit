@@ -333,6 +333,7 @@ public final class LiveCall {
 
     private void startAudio() {
         try {
+            playing = true;
             if (record == null) {
                 int minBuf = AudioRecord.getMinBufferSize(IN_RATE,
                         AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -379,6 +380,7 @@ public final class LiveCall {
                 }
                 track = tb.build();
                 track.play();
+                playing = true;   // stopAudio() cleared it; a reconnected call must play again
                 playThread = new Thread(this::playLoop, "live-play");
                 playThread.setPriority(Thread.MAX_PRIORITY);
                 playThread.start();

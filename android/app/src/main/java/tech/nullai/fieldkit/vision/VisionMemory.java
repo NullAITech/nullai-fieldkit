@@ -120,16 +120,17 @@ public final class VisionMemory {
         }
 
         String hash = type + ":" + recognizedName + ":" + faces + ":" + bodies + ":" + (objects > 0 ? r.objects.get(0) : "");
-        // Only append if state changed or >= 7 seconds have elapsed to keep memory compact
-        if (hash.equals(lastSummaryHash) && (now - lastEventTimeMs < 7000L)) {
-            return;
-        }
 
-        lastSummaryHash = hash;
-        lastEventTimeMs = now;
-
-        VisionEvent ev = new VisionEvent(now, type, summary, details, faces, bodies, recognizedName);
         synchronized (lock) {
+            // Only append if state changed or >= 7 seconds have elapsed to keep memory compact
+            if (hash.equals(lastSummaryHash) && (now - lastEventTimeMs < 7000L)) {
+                return;
+            }
+
+            lastSummaryHash = hash;
+            lastEventTimeMs = now;
+
+            VisionEvent ev = new VisionEvent(now, type, summary, details, faces, bodies, recognizedName);
             events.addLast(ev);
             while (events.size() > MAX_EVENTS) {
                 events.removeFirst();
@@ -160,7 +161,8 @@ public final class VisionMemory {
         if (activeMode != null && !activeMode.isEmpty()) {
             sb.append("[ACTIVE SPOTTER MODE]: ").append(activeMode);
             if (activeObjective != null && !activeObjective.trim().isEmpty()) {
-                sb.append(" · Objective: \"").append(activeObjective.trim()).append("\"");
+                String safeObj = activeObjective.replaceAll("[\\r\\n\\[\\]]+", " ").trim();
+                sb.append(" · Objective: \"").append(safeObj).append("\"");
             }
             sb.append("\nGround all spoken replies in this visual memory timeline.");
         }
@@ -173,58 +175,58 @@ public final class VisionMemory {
      */
     public String checkObjectiveTrigger(String activeMode, String activeObjective) {
         long now = System.currentTimeMillis();
-        if (now - lastProactiveTriggerMs < 20_000L) return null;
-
         VisionEvent latest = null;
         synchronized (lock) {
+            if (now - lastProactiveTriggerMs < 20_000L) return null;
             if (!events.isEmpty()) latest = events.peekLast();
-        }
-        if (latest == null) return null;
+            if (latest == null) return null;
 
-        String mode = activeMode == null ? "intel" : activeMode.toLowerCase(Locale.ROOT);
+            String mode = activeMode == null ? "intel" : activeMode.toLowerCase(Locale.ROOT);
 
-        // 1. Intel / Network mode: fire when a person is recognized or appears
-        if ("intel".equals(mode) || "network".equals(mode)) {
-            if (!latest.recognizedName.isEmpty() && !latest.recognizedName.equals(lastRecognizedPersonId)) {
-                lastRecognizedPersonId = latest.recognizedName;
-                lastProactiveTriggerMs = now;
-                return "[OBJECTIVE TRIGGER: INTEL]: Person recognized in front of wearer: "
-                        + latest.summary + ". Discreetly whisper who they are and a natural opener.";
-            } else if (latest.faceCount > 0 && lastRecognizedPersonId.isEmpty() && (now - latest.timestampMs < 3000L)) {
-                lastProactiveTriggerMs = now;
-                return "[OBJECTIVE TRIGGER: NETWORKING]: Unrecognized person currently in view. "
-                        + "Discreetly offer a friendly opener or remind wearer they can say Save Person.";
+            // 1. Intel / Network mode: fire when a person is recognized or appears
+            if ("intel".equals(mode) || "network".equals(mode)) {
+                if (!latest.recognizedName.isEmpty() && !latest.recognizedName.equals(lastRecognizedPersonId)) {
+                    lastRecognizedPersonId = latest.recognizedName;
+                    lastProactiveTriggerMs = now;
+                    return "[OBJECTIVE TRIGGER: INTEL]: Person recognized in front of wearer: "
+                            + latest.summary + ". Discreetly whisper who they are and a natural opener.";
+                } else if (latest.faceCount > 0 && lastRecognizedPersonId.isEmpty() && (now - latest.timestampMs < 3000L)) {
+                    lastProactiveTriggerMs = now;
+                    return "[OBJECTIVE TRIGGER: NETWORKING]: Unrecognized person currently in view. "
+                            + "Discreetly offer a friendly opener or remind wearer they can say Save Person.";
+                }
             }
-        }
 
-        // 2. Vibe Coder mode: screen / workstation spotted
-        if ("vibe_coder".equals(mode) || "code".equals(mode)) {
-            if ("CODE_SCREEN".equals(latest.type) && (now - latest.timestampMs < 4000L)) {
-                lastProactiveTriggerMs = now;
-                return "[OBJECTIVE TRIGGER: VIBE CODER]: Code screen / workstation detected in view. "
-                        + "Offer to inspect the current code or syntax if the wearer has a question.";
+            // 2. Vibe Coder mode: screen / workstation spotted
+            if ("vibe_coder".equals(mode) || "code".equals(mode)) {
+                if ("CODE_SCREEN".equals(latest.type) && (now - latest.timestampMs < 4000L)) {
+                    lastProactiveTriggerMs = now;
+                    return "[OBJECTIVE TRIGGER: VIBE CODER]: Code screen / workstation detected in view. "
+                            + "Offer to inspect the current code or syntax if the wearer has a question.";
+                }
             }
-        }
 
-        // 3. Subconscious / God's Voice mode: tranquil or transitioning
-        if ("god_voice".equals(mode) || "subconscious".equals(mode)) {
-            // Only trigger if an unrecognized stranger is standing close or wearer enters a new space
-            if (latest.faceCount > 0 && (now - latest.timestampMs < 3000L)) {
-                lastProactiveTriggerMs = now;
-                return "[OBJECTIVE TRIGGER: SUBCONSCIOUS]: A soul has entered the wearer's immediate space. "
-                        + "Offer one calm, grounding sentence of perspective.";
+            // 3. Subconscious / God's Voice mode: tranquil or transitioning
+            if ("god_voice".equals(mode) || "subconscious".equals(mode)) {
+                // Only trigger if an unrecognized stranger is standing close or wearer enters a new space
+                if (latest.faceCount > 0 && (now - latest.timestampMs < 3000L)) {
+                    lastProactiveTriggerMs = now;
+                    return "[OBJECTIVE TRIGGER: SUBCONSCIOUS]: A soul has entered the wearer's immediate space. "
+                            + "Offer one calm, grounding sentence of perspective.";
+                }
             }
-        }
 
-        // 4. Custom directive: check if latest event contains objective keywords
-        if ("directive".equals(mode) || "custom".equals(mode)) {
-            if (activeObjective != null && !activeObjective.isEmpty()) {
-                String[] words = activeObjective.toLowerCase(Locale.ROOT).split("\\s+");
-                for (String w : words) {
-                    if (w.length() >= 4 && latest.summary.toLowerCase(Locale.ROOT).contains(w)) {
-                        lastProactiveTriggerMs = now;
-                        return "[OBJECTIVE TRIGGER: DIRECTIVE MATCH]: Visual match for \"" + w + "\" ("
-                                + latest.summary + "). Advise wearer on their next step toward: " + activeObjective;
+            // 4. Custom directive: check if latest event contains objective keywords
+            if ("directive".equals(mode) || "custom".equals(mode)) {
+                if (activeObjective != null && !activeObjective.isEmpty()) {
+                    String safeObj = activeObjective.replaceAll("[\\r\\n\\[\\]]+", " ").trim();
+                    String[] words = safeObj.toLowerCase(Locale.ROOT).split("\\s+");
+                    for (String w : words) {
+                        if (w.length() >= 4 && latest.summary.toLowerCase(Locale.ROOT).contains(w)) {
+                            lastProactiveTriggerMs = now;
+                            return "[OBJECTIVE TRIGGER: DIRECTIVE MATCH]: Visual match for \"" + w + "\" ("
+                                    + latest.summary + "). Advise wearer on their next step toward: " + safeObj;
+                        }
                     }
                 }
             }
