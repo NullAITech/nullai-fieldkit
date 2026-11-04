@@ -37,7 +37,9 @@ import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.util.Base64;
 import android.util.Log;
+import android.graphics.Typeface;
 import android.util.Size;
+import android.view.Gravity;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
@@ -47,6 +49,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -106,14 +109,17 @@ public class MainActivity extends Activity {
     private static final int REQ_DAT_CAM = 4101;   // Meta AI glasses camera permission
     private static final int REQ_CHATS = 4202;     // Conversations history & new session view
 
-    private Button btnMainCaptions, btnMainChats, btnMainRtmp;
-    private TextView tvMainLiveCaptions;
+    private Button btnMainCaptions, btnMainChats, btnMainRtmp, btnMainVoiceTriggers;
+    private TextView tvMainLiveCaptions, tvVisionTicker;
     private LinearLayout mainPersonCardOverlay;
     private boolean captionsEnabled = true;
     private String activeConvId = "";
     private final Handler mainUiHandler = new Handler(Looper.getMainLooper());
     private final Runnable hideMainCaptionsTask = () -> {
         if (tvMainLiveCaptions != null) tvMainLiveCaptions.setVisibility(View.GONE);
+    };
+    private final Runnable hideVisionTickerTask = () -> {
+        if (tvVisionTicker != null) tvVisionTicker.setVisibility(View.GONE);
     };
     private volatile byte[] lastMainJpeg;
     private final ArrayDeque<Bitmap> mainRollingFrames = new ArrayDeque<>(4);
@@ -335,6 +341,11 @@ public class MainActivity extends Activity {
             btnMainPeople.setOnClickListener(v ->
                     startActivity(new Intent(this, PeopleActivity.class)));
         }
+        btnMainVoiceTriggers = findViewById(R.id.btnMainVoiceTriggers);
+        if (btnMainVoiceTriggers != null) {
+            btnMainVoiceTriggers.setOnClickListener(v -> showVoiceTriggersCheatSheet());
+        }
+        tvVisionTicker = findViewById(R.id.tvVisionTicker);
         final Button btnMainDevToggle = findViewById(R.id.btnMainDevToggle);
         final TextView tvDevDrawerHeader = findViewById(R.id.tvDevDrawerHeader);
         final View devControlsBody = findViewById(R.id.devControlsBody);
@@ -624,6 +635,151 @@ public class MainActivity extends Activity {
             mainUiHandler.removeCallbacks(hideMainCaptionsTask);
             mainUiHandler.postDelayed(hideMainCaptionsTask, 9000);
         });
+    }
+
+    private void showVisionMemoryTicker(String msg) {
+        if (tvVisionTicker == null || msg == null || msg.trim().isEmpty()) return;
+        runOnUiThread(() -> {
+            tvVisionTicker.setText(msg);
+            tvVisionTicker.setVisibility(View.VISIBLE);
+            mainUiHandler.removeCallbacks(hideVisionTickerTask);
+            mainUiHandler.postDelayed(hideVisionTickerTask, 5000);
+        });
+    }
+
+    private int dp(float v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private void showVoiceTriggersCheatSheet() {
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(0xFF090D14);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(16), dp(16), dp(16), dp(16));
+        sv.addView(root);
+
+        TextView title = new TextView(this);
+        title.setText("🗣️ 12 Hands-Free Voice Triggers");
+        title.setTextSize(18f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(0xFFFFFFFF);
+        root.addView(title);
+
+        TextView sub = new TextView(this);
+        sub.setText("Natural spoken commands for Ray-Ban Meta glasses — no phone touch required.");
+        sub.setTextSize(12.5f);
+        sub.setTextColor(0xFF94A3B8);
+        sub.setPadding(0, dp(4), 0, dp(14));
+        root.addView(sub);
+
+        // Sections
+        addTriggerSection(root, "🛡️ SECURITY & CAMOUFLAGE", new String[][]{
+                {"\"Zoth Protocol Zero\"", "Lock vault, clear HUD, enter camouflage", "PROTOCOL_ZERO"},
+                {"\"Obsidian Ghost Veil\"", "Silent stealth HUD, muted speaker audio", "GHOST_VEIL"}
+        });
+
+        addTriggerSection(root, "⚡ LIVE CALL & 3D PRESENCE", new String[][]{
+                {"\"Zoth Soul Awaken\"", "Summon full-duplex session with 3D presence", "SOUL_AWAKEN"},
+                {"\"Aperture Horizon Sever\"", "Emergency disconnect & immediate audio sever", "HORIZON_SEVER"}
+        });
+
+        addTriggerSection(root, "📸 VISION & MEMORY", new String[][]{
+                {"\"Chrono Character Lock\"", "Snap 4-angle Character Board of person in view", "CHARACTER_LOCK"},
+                {"\"Vision Timeline Echo\"", "Query recent ambient sights in Vision Memory", "TIMELINE_ECHO"}
+        });
+
+        addTriggerSection(root, "🎭 PERSONA MODES", new String[][]{
+                {"\"Silent Oracle Whisper\"", "Subconscious / God's Voice in your ear", "ORACLE_WHISPER"},
+                {"\"Syntax Matrix Inspect\"", "Vibe Coder screen wingman mode", "SYNTAX_MATRIX"},
+                {"\"Tactical Social Recon\"", "Intel & People dossier tracking mode", "SOCIAL_RECON"},
+                {"\"Starlight Sovereign Vector\"", "Custom objective goal directive mode", "SOVEREIGN_VECTOR"}
+        });
+
+        addTriggerSection(root, "📡 LIVE BROADCASTING", new String[][]{
+                {"\"Zoth Broadcast Start\"", "Start live RTMP stream (X, Twitch, YouTube, OBS)", "BROADCAST_START"},
+                {"\"Aperture Broadcast Stop\"", "Stop active RTMP stream immediately", "BROADCAST_STOP"}
+        });
+
+        new AlertDialog.Builder(this)
+                .setView(sv)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    private void addTriggerSection(LinearLayout parent, String sectionTitle, String[][] triggers) {
+        TextView secTv = new TextView(this);
+        secTv.setText(sectionTitle);
+        secTv.setTextSize(11f);
+        secTv.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        secTv.setTextColor(0xFF38BDF8);
+        secTv.setPadding(0, dp(10), 0, dp(4));
+        parent.addView(secTv);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_dark_card);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.bottomMargin = dp(8);
+        card.setLayoutParams(clp);
+
+        for (int i = 0; i < triggers.length; i++) {
+            final String phrase = triggers[i][0];
+            final String desc = triggers[i][1];
+            final String cmdKey = triggers[i][2];
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(4), 0, dp(4));
+
+            LinearLayout textCol = new LinearLayout(this);
+            textCol.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            textCol.setLayoutParams(tlp);
+
+            TextView pTv = new TextView(this);
+            pTv.setText(phrase);
+            pTv.setTextSize(13.5f);
+            pTv.setTypeface(Typeface.DEFAULT_BOLD);
+            pTv.setTextColor(0xFFFDE68A);
+            textCol.addView(pTv);
+
+            TextView dTv = new TextView(this);
+            dTv.setText(desc);
+            dTv.setTextSize(11.5f);
+            dTv.setTextColor(0xFFCBD5E1);
+            textCol.addView(dTv);
+
+            row.addView(textCol);
+
+            Button btnTest = new Button(this);
+            btnTest.setText("▶ Test");
+            btnTest.setTextSize(11f);
+            btnTest.setTypeface(Typeface.DEFAULT_BOLD);
+            btnTest.setTextColor(0xFF34D399);
+            btnTest.setBackgroundResource(R.drawable.bg_dark_pill);
+            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(62), dp(34));
+            blp.leftMargin = dp(6);
+            btnTest.setLayoutParams(blp);
+            btnTest.setOnClickListener(v -> {
+                try {
+                    WakePhrase.Command cmd = WakePhrase.Command.valueOf(cmdKey);
+                    executeMainSpokenCommand(cmd);
+                    Toast.makeText(this, "Simulated: " + phrase, Toast.LENGTH_SHORT).show();
+                } catch (Exception ignored) {}
+            });
+            row.addView(btnTest);
+
+            card.addView(row);
+            if (i < triggers.length - 1) {
+                View div = new View(this);
+                div.setBackgroundColor(0xFF1E293B);
+                card.addView(div, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+            }
+        }
+        parent.addView(card);
     }
 
     private void speak(String s) {
@@ -1463,6 +1619,13 @@ public class MainActivity extends Activity {
                     String trig = mainVisionMemory.checkObjectiveTrigger(curMode != null ? curMode.key : "intel", activeObj);
                     if (trig != null) {
                         showMainLiveCaption("💡 " + trig);
+                        showVisionMemoryTicker("💡 " + trig);
+                    } else if (matchUi != null && matchUi.person != null) {
+                        showVisionMemoryTicker("👁️ Vision: " + matchUi.person.name + " (" + (int)(matchUi.score * 100) + "% match)");
+                    } else if (!r.faces.isEmpty()) {
+                        showVisionMemoryTicker("👁️ Vision: " + r.faces.size() + (r.faces.size() == 1 ? " person in view" : " people in view"));
+                    } else if (!r.bodies.isEmpty()) {
+                        showVisionMemoryTicker("👁️ Vision: Tracking body pose in frame");
                     }
                 });
             } catch (Throwable ignored) {

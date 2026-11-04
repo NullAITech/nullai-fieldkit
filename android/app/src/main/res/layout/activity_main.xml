@@ -175,14 +175,37 @@
             android:importantForAccessibility="no" />
 
         <!-- Spotter Persona Mode Switcher -->
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SPOTTER MODE &amp; OBJECTIVE"
-            android:textColor="#475569"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="6dp" />
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="SPOTTER MODE &amp; OBJECTIVE"
+                android:textColor="#475569"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnMainVoiceTriggers"
+                android:contentDescription="12 Hands-free voice triggers cheat sheet"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:minHeight="28dp"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="0dp"
+                android:background="@drawable/bg_dark_pill"
+                android:text="🗣️ 12 Triggers"
+                android:textAllCaps="false"
+                android:textColor="#FDE68A"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/mainModeBar"
@@ -372,6 +395,25 @@
                 android:textColor="#FCA5A5"
                 android:textSize="11sp"
                 android:textStyle="bold"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvVisionTicker"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="42dp"
+                android:layout_marginEnd="85dp"
+                android:background="@drawable/bg_dark_pill"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:textColor="#34D399"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:text="👁️ Vision Memory · Active"
                 android:visibility="gone" />
 
             <TextView

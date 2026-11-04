@@ -2,7 +2,15 @@ package tech.nullai.fieldkit.people;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
+import java.io.OutputStream;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -1287,6 +1295,21 @@ public final class CharacterBoard {
                 p.voice.length > 0 ? 0xFF34D399 : 0xFF94A3B8);
         root.addView(table);
 
+        Button btnShareCard = new Button(activity);
+        btnShareCard.setText("📤 Export & Share Dossier Card (PNG)");
+        btnShareCard.setTextSize(13f);
+        btnShareCard.setTypeface(Typeface.DEFAULT_BOLD);
+        btnShareCard.setAllCaps(false);
+        btnShareCard.setTextColor(0xFF34D399);
+        btnShareCard.setBackgroundResource(R.drawable.bg_accent_emerald);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 44));
+        btnLp.topMargin = dp(activity, 14);
+        btnLp.bottomMargin = dp(activity, 8);
+        btnShareCard.setLayoutParams(btnLp);
+        btnShareCard.setOnClickListener(v -> exportAndShareDossierCard(activity, p));
+        root.addView(btnShareCard);
+
         // Editable fields
         root.addView(fieldLabel(activity, "EDIT NAME"));
         EditText etName = styledInput(activity, "Name", true);
@@ -1472,6 +1495,175 @@ public final class CharacterBoard {
         else rel = (diffSec / 86400) + "d ago";
         Date d = new Date(ms);
         return rel + " (" + DateFormat.getTimeFormat(ctx).format(d) + ")";
+    }
+
+    public static Uri exportAndShareDossierCard(Activity activity, PeopleVault.Person p) {
+        if (activity == null || p == null) return null;
+        try {
+            int width = 1080;
+            int height = 1680;
+            Bitmap card = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(card);
+
+            // 1. Dark Gradient Background
+            Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            bgPaint.setColor(0xFF080D17);
+            c.drawRect(0, 0, width, height, bgPaint);
+
+            // Subtle border
+            Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setColor(0xFF1E293B);
+            strokePaint.setStrokeWidth(3f);
+            c.drawRect(24, 24, width - 24, height - 24, strokePaint);
+
+            // Glowing header bar
+            Paint headerBarPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            headerBarPaint.setColor(0xFF0F172A);
+            c.drawRect(24, 24, width - 24, 180, headerBarPaint);
+
+            // Top Cybernetic Accent Line
+            Paint cyanAccent = new Paint(Paint.ANTI_ALIAS_FLAG);
+            cyanAccent.setColor(0xFF38BDF8);
+            cyanAccent.setStrokeWidth(6f);
+            c.drawLine(24, 24, width - 24, 24, cyanAccent);
+
+            // Header Text
+            Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            textPaint.setColor(0xFF38BDF8);
+            textPaint.setTextSize(32f);
+            textPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+            c.drawText("SPOTTER // NULLAI FIELDKIT DOSSIER", 60, 90, textPaint);
+
+            textPaint.setColor(0xFF94A3B8);
+            textPaint.setTextSize(22f);
+            textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            c.drawText("RAY-BAN META GLASSES POV · 4-ANGLE SPATIAL RECON", 60, 135, textPaint);
+
+            // Badge at top right
+            Paint badgeBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+            badgeBg.setColor(0xFF134E4A);
+            RectF badgeR = new RectF(width - 260, 60, width - 60, 120);
+            c.drawRoundRect(badgeR, 16, 16, badgeBg);
+            textPaint.setColor(0xFF34D399);
+            textPaint.setTextSize(22f);
+            textPaint.setTextAlign(Paint.Align.CENTER);
+            c.drawText("VERIFIED ✓", badgeR.centerX(), badgeR.centerY() + 8, textPaint);
+            textPaint.setTextAlign(Paint.Align.LEFT);
+
+            // Hero Subject Info
+            textPaint.setColor(0xFFFFFFFF);
+            textPaint.setTextSize(54f);
+            textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            c.drawText(p.name, 60, 260, textPaint);
+
+            textPaint.setColor(0xFF34D399);
+            textPaint.setTextSize(30f);
+            String roleText = p.role.isEmpty() ? "Verified Teammate" : p.role;
+            c.drawText(roleText + "  ·  Spotted " + Math.max(1, p.seenCount) + " times", 60, 310, textPaint);
+
+            // 4-Angle Imagery Box
+            Bitmap boardBm = decodeBase64(!p.boardThumb.isEmpty() ? p.boardThumb : p.thumb);
+            if (boardBm != null) {
+                Rect destR = new Rect(60, 350, width - 60, 890);
+                Paint imgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+                Paint imgBg = new Paint();
+                imgBg.setColor(0xFF020617);
+                c.drawRect(destR, imgBg);
+                c.drawBitmap(boardBm, null, destR, imgPaint);
+
+                Paint imgBorder = new Paint(Paint.ANTI_ALIAS_FLAG);
+                imgBorder.setStyle(Paint.Style.STROKE);
+                imgBorder.setColor(0xFF334155);
+                imgBorder.setStrokeWidth(2f);
+                c.drawRect(destR, imgBorder);
+            }
+
+            // Telemetry & Attire Card Box
+            RectF telemBox = new RectF(60, 920, width - 60, 1490);
+            Paint telemBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+            telemBg.setColor(0xFF0F172A);
+            c.drawRoundRect(telemBox, 24, 24, telemBg);
+            strokePaint.setColor(0xFF1E293B);
+            c.drawRoundRect(telemBox, 24, 24, strokePaint);
+
+            float rowY = 980;
+            drawCardRow(c, "WHO THEY ARE", p.name + " (" + roleText + ")", 0xFFFFFFFF, 100, rowY);
+            rowY += 85;
+            drawCardRow(c, "ENCOUNTER TIMELINE", formatRelativeAndTime(activity, p.lastSeenAt) + " · " + p.lastSeenContext, 0xFF34D399, 100, rowY);
+            rowY += 85;
+            drawCardRow(c, "SIGHTING METRICS", p.seenCount + " total sightings · First enrolled: " + formatShortDate(activity, p.savedAt), 0xFFF8FAFC, 100, rowY);
+            rowY += 85;
+            String attireStr = (p.attire.isEmpty() ? "Standard Attire" : p.attire) + " · " + (p.buildSummary.isEmpty() ? "Balanced Frame" : p.buildSummary);
+            drawCardRow(c, "LOOK & ATTIRE", attireStr, 0xFF7DD3FC, 100, rowY);
+            rowY += 85;
+            String voiceStr = p.voice.length > 0 ? "Voiceprint Enrolled (Dual-Factor Match)" : "Visual Descriptor Match Only";
+            drawCardRow(c, "BIOMETRIC CORES", voiceStr, p.voice.length > 0 ? 0xFF34D399 : 0xFF94A3B8, 100, rowY);
+            rowY += 85;
+            if (p.notes != null && !p.notes.trim().isEmpty()) {
+                drawCardRow(c, "FIELD NOTES", p.notes.trim(), 0xFFE2E8F0, 100, rowY);
+            }
+
+            // Footer
+            textPaint.setColor(0xFF64748B);
+            textPaint.setTextSize(22f);
+            textPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL));
+            c.drawText("ENGINEERED BY NEAL FRAZIER TECH (@1NC0GN30) · NULLAI PLATFORM", 60, 1550, textPaint);
+            c.drawText("META GLOBAL AI DEVELOPER HACKATHON 2026 · LIVE EYE RECON", 60, 1590, textPaint);
+
+            // Save to MediaStore
+            ContentResolver resolver = activity.getContentResolver();
+            ContentValues values = new ContentValues();
+            String cleanName = p.name.replaceAll("[^a-zA-Z0-9_-]", "_");
+            String fileName = "Dossier_" + cleanName + "_" + System.currentTimeMillis() + ".png";
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/SpotterDossiers");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+            Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri != null) {
+                try (OutputStream os = resolver.openOutputStream(uri)) {
+                    if (os != null) {
+                        card.compress(Bitmap.CompressFormat.PNG, 100, os);
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear();
+                    values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                    resolver.update(uri, values, null, null);
+                }
+
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("image/png");
+                share.putExtra(Intent.EXTRA_STREAM, uri);
+                share.putExtra(Intent.EXTRA_TEXT, "Spotter 4-Angle Character Dossier: " + p.name + " (" + roleText + ") · Captured from Ray-Ban Meta glasses via NullAI FieldKit");
+                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                activity.startActivity(Intent.createChooser(share, "Share Dossier Card"));
+                Toast.makeText(activity, "Saved to Pictures/SpotterDossiers!", Toast.LENGTH_SHORT).show();
+                return uri;
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Export dossier card failed: " + t.getMessage(), t);
+            Toast.makeText(activity, "Export failed: " + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
+        return null;
+    }
+
+    private static void drawCardRow(Canvas c, String label, String value, int valColor, float x, float y) {
+        Paint lp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        lp.setColor(0xFF64748B);
+        lp.setTextSize(18f);
+        lp.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        c.drawText(label, x, y, lp);
+
+        Paint vp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        vp.setColor(valColor);
+        vp.setTextSize(26f);
+        vp.setTypeface(Typeface.DEFAULT_BOLD);
+        String truncated = value.length() > 50 ? value.substring(0, 48) + "…" : value;
+        c.drawText(truncated, x, y + 34, vp);
     }
 
     public static String formatShortDate(Context ctx, long ms) {
