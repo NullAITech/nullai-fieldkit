@@ -96,3 +96,18 @@ Smart glasses have cameras, microphones, and speakers—yet almost all "smart as
 - Native audio streaming directly over DAT Bluetooth mic when released by Meta.
 - Wearable-to-wearable collaborative mission sync for multi-technician teams.
 - On-device lightweight Llama 3.2 1B edge quantized models running locally on Snapdragon NPU.
+
+---
+
+## 7. Official Video Showreel & Live Demo Links
+- **Master Video Showreel**: `demos/spotter-hackathon-showreel-final.mp4` (2m 48s, 720×1600, 30fps)
+- **High-Res Poster Asset**: `demos/spotter-showreel-poster.jpg`
+- **Video Segments Included**:
+  1. Ray-Ban Meta Smart Glasses Hardware Sync & Sensor Stream
+  2. Proactive Spatial Grounding & Live Desk Roast via Meta Spark
+  3. Muse Full-Duplex Live Call & 127ms Sub-Hundred-Millisecond Bounding Boxes
+  4. On-Device MediaPipe Skeletal Hand Tracking & Spatial Vector Rays
+  5. 4-Angle CharacterBoard Biometric Vault & Offline Attire Matching (Neal & Joe)
+  6. Near-Field Wearer-Only Voice Gate Double Attempt & Bystander Suppression
+  7. 200+ Turns Persistent Spatial Memory Timeline & Creator Attribution
+  8. Live 3D Fibonacci Avatar Full-Duplex Ending Conversation & Spatial Humor
